@@ -449,19 +449,37 @@ static std::vector<parquet::format::RowGroup> filter_groups(parquet::format::Fil
     return filtered_groups;
 }
 
-void deserialize_parquet_footer(uint8_t * buffer, uint32_t len, parquet::format::FileMetaData * meta) {
-  using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
+using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
+using ThriftProtocol = apache::thrift::protocol::TProtocol;
 
-  CUDF_FUNC_RANGE();
+struct transport_protocol {
+  std::shared_ptr<ThriftBuffer> t_transport;
+  std::shared_ptr<ThriftProtocol> t_protocol;
+
+  void reset_transport(uint8_t* buffer, uint32_t len) {
+    t_transport->resetBuffer(buffer, len);
+  }
+};
+
+transport_protocol* initialize() {
   // A lot of this came from the parquet source code...
   // Deserialize msg bytes into c++ thrift msg using memory transport.
   #if PARQUET_THRIFT_VERSION_MAJOR > 0 || PARQUET_THRIFT_VERSION_MINOR >= 14
   auto conf = std::make_shared<apache::thrift::TConfiguration>();
   conf->setMaxMessageSize(std::numeric_limits<int>::max());
-  auto tmem_transport = std::make_shared<ThriftBuffer>(buffer, len, ThriftBuffer::OBSERVE, conf);
+  auto tmem_transport = new ThriftBuffer(
+    nullptr,
+    ThriftBuffer::defaultSize,
+    ThriftBuffer::OBSERVE,
+    conf);
   #else
-  auto tmem_transport = std::make_shared<ThriftBuffer>(buffer, len);
+  auto tmem_transport = new ThriftBuffer(
+    nullptr,
+    ThriftBuffer::defaultSize);
   #endif
+
+  auto tp = new transport_protocol();
+  tp->t_transport.reset(tmem_transport);
 
   apache::thrift::protocol::TCompactProtocolFactoryT<ThriftBuffer> tproto_factory;
   // Protect against CPU and memory bombs
@@ -469,11 +487,22 @@ void deserialize_parquet_footer(uint8_t * buffer, uint32_t len, parquet::format:
   // Structs in the thrift definition are relatively large (at least 300 bytes).
   // This limits total memory to the same order of magnitude as stringSize.
   tproto_factory.setContainerSizeLimit(1000 * 1000);
-  std::shared_ptr<apache::thrift::protocol::TProtocol> tproto =
-      tproto_factory.getProtocol(tmem_transport);
+  tp->t_protocol = tproto_factory.getProtocol(tp->t_transport);
+
+  return tp;
+}
+
+void deserialize_parquet_footer(uint8_t * buffer, uint32_t len, parquet::format::FileMetaData * meta) {
+  CUDF_FUNC_RANGE();
+
+  auto tp = initialize();
+  tp->reset_transport(buffer, len);
+
   try {
-    meta->read(tproto.get());
+    meta->read(tp->t_protocol.get());
+    delete tp;
   } catch (std::exception& e) {
+    delete tp;
     std::stringstream ss;
     ss << "Couldn't deserialize thrift: " << e.what() << "\n";
     throw std::runtime_error(ss.str());
@@ -495,6 +524,22 @@ void filter_columns(std::vector<parquet::format::RowGroup> & groups, std::vector
 }
 
 extern "C" {
+JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_initialize(JNIEnv * env, jclass) {
+  auto tp = rapids::jni::initialize();
+  return (long)tp;
+}
+
+JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_reset(JNIEnv * env, jclass,
+    jlong tpaddr, jlong buffer, jlong buffer_length) {
+  auto tp = reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr);
+  tp->reset_transport(reinterpret_cast<uint8_t*>(buffer), buffer_length);
+}
+
+JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_delete(JNIEnv * env, jclass,
+    jlong tpaddr) {
+  auto tp = reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr);
+  delete tp;
+}
 
 JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFilter(JNIEnv * env, jclass,
                                                                                     jlong buffer,

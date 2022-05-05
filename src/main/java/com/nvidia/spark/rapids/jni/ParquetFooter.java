@@ -94,6 +94,18 @@ public class ParquetFooter implements AutoCloseable {
             ignoreCase));
   }
 
+  // returns handle to a dynamic TMemoryBuffer
+  public static native long initialize();
+  public static native void reset(long tmem_transport, long address, long length);
+  public static native void delete(long tmem_transport);
+
+  private static native long readAndFilter(long tmem_transport,
+                                           long partOffset, long partLength,
+                                           String[] names,
+                                           int[] numChildren,
+                                           int parentNumChildren,
+                                           boolean ignoreCase) throws CudfException;
+
   // Native APIS
   private static native long readAndFilter(long address, long length,
       long partOffset, long partLength,
@@ -111,4 +123,5 @@ public class ParquetFooter implements AutoCloseable {
   private static native HostMemoryBuffer serializeCustom(long nativeHandle);
 
   private static native HostMemoryBuffer serializeThriftFile(long nativeHandle);
+
 }
