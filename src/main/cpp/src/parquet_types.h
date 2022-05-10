@@ -2776,6 +2776,14 @@ typedef struct _FileMetaData__isset {
   bool footer_signing_key_metadata :1;
 } _FileMetaData__isset;
 
+class FileMetaDataListener {
+  public:
+    virtual void on_schema(const SchemaElement& se) = 0;
+    virtual void on_key_value(const KeyValue& kv) = 0;
+    virtual void on_row_group(const RowGroup& kv) = 0;
+    virtual void on_column_order(const ColumnOrder& kv) = 0;
+};
+
 class FileMetaData : public virtual ::apache::thrift::TBase {
  public:
 
@@ -2783,8 +2791,21 @@ class FileMetaData : public virtual ::apache::thrift::TBase {
   FileMetaData& operator=(const FileMetaData&);
   FileMetaData() : version(0), num_rows(0), created_by(), footer_signing_key_metadata() {
   }
+  FileMetaData(FileMetaDataListener* listener) 
+    : version(0), num_rows(0), created_by(), footer_signing_key_metadata(),_listener(listener) {
+  }
 
   void on_schema(const SchemaElement& se){
+    _listener->on_schema(se);
+  }
+  void on_key_value(const KeyValue& kv){
+    _listener->on_key_value(kv);
+  }
+  void on_row_group(const RowGroup& rg){
+    _listener->on_row_group(rg);
+  }
+  void on_column_order(const ColumnOrder& co){
+    _listener->on_column_order(co);
   }
 
   virtual ~FileMetaData() noexcept;
@@ -2797,6 +2818,7 @@ class FileMetaData : public virtual ::apache::thrift::TBase {
   std::vector<ColumnOrder>  column_orders;
   EncryptionAlgorithm encryption_algorithm;
   std::string footer_signing_key_metadata;
+  FileMetaDataListener* _listener;
 
   _FileMetaData__isset __isset;
 

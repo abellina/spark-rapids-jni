@@ -7058,15 +7058,18 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
       case 4:
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
-            this->row_groups.clear();
+            //this->row_groups.clear();
             uint32_t _size190;
             ::apache::thrift::protocol::TType _etype193;
             xfer += iprot->readListBegin(_etype193, _size190);
-            this->row_groups.resize(_size190);
+            //this->row_groups.resize(_size190);
             uint32_t _i194;
+            RowGroup rg;
             for (_i194 = 0; _i194 < _size190; ++_i194)
             {
-              xfer += this->row_groups[_i194].read(iprot);
+              xfer += rg.read(iprot);
+              on_row_group(rg);
+              //xfer += this->row_groups[_i194].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -7078,15 +7081,18 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
       case 5:
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
-            this->key_value_metadata.clear();
+            //this->key_value_metadata.clear();
             uint32_t _size195;
             ::apache::thrift::protocol::TType _etype198;
             xfer += iprot->readListBegin(_etype198, _size195);
-            this->key_value_metadata.resize(_size195);
+            //this->key_value_metadata.resize(_size195);
             uint32_t _i199;
+            KeyValue kv;
             for (_i199 = 0; _i199 < _size195; ++_i199)
             {
-              xfer += this->key_value_metadata[_i199].read(iprot);
+              xfer += kv.read(iprot);
+              on_key_value(kv);
+              //xfer += this->key_value_metadata[_i199].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -7106,15 +7112,18 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
       case 7:
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
-            this->column_orders.clear();
+            //this->column_orders.clear();
             uint32_t _size200;
             ::apache::thrift::protocol::TType _etype203;
             xfer += iprot->readListBegin(_etype203, _size200);
-            this->column_orders.resize(_size200);
+            //this->column_orders.resize(_size200);
+            ColumnOrder co;
             uint32_t _i204;
             for (_i204 = 0; _i204 < _size200; ++_i204)
             {
-              xfer += this->column_orders[_i204].read(iprot);
+              xfer += co.read(iprot);
+              on_column_order(co);
+              //xfer += this->column_orders[_i204].read(iprot);
             }
             xfer += iprot->readListEnd();
           }

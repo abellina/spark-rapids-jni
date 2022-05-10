@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 #include <cwctype>
+#include <iostream>
 
 // TCompactProtocol requires some #defines to work right.
 // This came from the parquet code itself...
@@ -108,175 +109,122 @@ public:
             const std::vector<int> & num_children, 
             int parent_num_children): children(), s_id(0), c_id(-1) {
       add_depth_first(names, num_children, parent_num_children);
+      init();
     }
 
     column_pruner(int s_id, int c_id): children(), s_id(s_id), c_id(c_id) {
+      init();
     }
 
     column_pruner(): children(), s_id(0), c_id(-1) {
+      init();
     }
 
-    /**
-     * Given a schema from a parquet file create a set of pruning maps to prune columns from the rest of the footer
-     */
-    column_pruning_maps filter_schema(std::vector<rapids::parquet::format::SchemaElement> & schema, bool ignore_case) {
-      // The following are all covered by follow on work in https://github.com/NVIDIA/spark-rapids-jni/issues/210
-      // TODO the java code will fail if there is ambiguity in the names and ignore_case is true
-      // so we need to figure that out too.
-      // TODO there are a number of different way to represent a list or a map. We want to support all of them
-      //  so we need a way to detect that schema is a list and group the parts we don't care about together.
-      // TODO the java code verifies that the schema matches when it is looking at the columns or it throws
-      // an exception. Sort of, It really just checks that it is a GroupType where it expects to find them
-      //
-      // With all of this in mind I think what we want to do is to pass down a full-ish schema, not just the names,
-      // and the number of children. We need to know if it is a Map, an Array, a Struct or primitive.
-      //
-      // Then when we are walking the tree we need to keep track of if we are looking for a Map, an array or
-      // a struct and match up the SchemaElement entries accordingly as we go.
-      // If we see something that is off we need to throw an exception.
-      //
-      // To be able to handle the duplicates, I think we need to have some state in the column_pruner class
-      // to say if we have matched a leaf node or not.
-      // 
-      // From the Parquet spec
-      // https://github.com/apache/parquet-format/blob/master/LogicalTypes.md
-      //
-      // A repeated field that is neither contained by a LIST- or MAP-annotated group nor annotated by LIST
-      // or MAP should be interpreted as a required list of required elements where the element type is the
-      // type of the field.
-      //
-      // LIST must always annotate a 3-level structure:
-      // <list-repetition> group <name> (LIST) {
-      //   repeated group list {
-      //     <element-repetition> <element-type> element;
-      //   }
-      // }
-      // ...
-      // However, these names may not be used in existing data and should not be enforced as errors when reading.
-      // ...
-      // Some existing data does not include the inner element layer. For backward-compatibility, the type of
-      // elements in LIST-annotated structures should always be determined by the following rules:
-      //
-      //  1. If the repeated field is not a group, then its type is the element type and elements are required.
-      //  2. If the repeated field is a group with multiple fields, then its type is the element type and
-      //     elements are required.
-      //  3. If the repeated field is a group with one field and is named either array or uses the
-      //     LIST-annotated group's name with _tuple appended then the repeated type is the element
-      //     type and elements are required.
-      //  4. Otherwise, the repeated field's type is the element type with the repeated field's repetition.
+    std::map<int, int, std::less<int>> chunk_map;
+    std::map<int, int, std::less<int>> schema_map;
+    std::map<int, int, std::less<int>> num_children_map;
+    std::vector<int> num_children_stack;
+    std::vector<column_pruner*> tree_stack;
+    std::vector<rapids::parquet::format::SchemaElement> schema_items;
+    uint64_t chunk_index;
+    uint64_t schema_index;
 
-      // MAP is used to annotate types that should be interpreted as a map from keys to values. MAP must
-      // annotate a 3-level structure:
-      //
-      //  * The outer-most level must be a group annotated with MAP that contains a single field named
-      //    key_value. The repetition of this level must be either optional or required and determines
-      //    whether the list is nullable.
-      //  * The middle level, named key_value, must be a repeated group with a key field for map keys
-      //    and, optionally, a value field for map values.
-      //  * The key field encodes the map's key type. This field must have repetition required and must
-      //    always be present.
-      //  * The value field encodes the map's value type and repetition. This field can be required,
-      //    optional, or omitted.
-      //
-      // It is required that the repeated group of key-value pairs is named key_value and that its
-      // fields are named key and value. However, these names may not be used in existing data and
-      // should not be enforced as errors when reading.
-      //
-      // Some existing data incorrectly used MAP_KEY_VALUE in place of MAP. For backward-compatibility,
-      // a group annotated with MAP_KEY_VALUE that is not contained by a MAP-annotated group should be
-      // handled as a MAP-annotated group.
-
-      // Parquet says that the map's value is optional, but Spark looks like it would throw an exception
-      // if it ever actually saw that in practice, so we should too.
+    void init() {
       CUDF_FUNC_RANGE();
-      // The maps are sorted so we can compress the tree...
-      // These are the outputs of the computation
-      std::map<int, int, std::less<int>> chunk_map;
-      std::map<int, int, std::less<int>> schema_map;
-      std::map<int, int, std::less<int>> num_children_map;
       // Start off with 0 children in the root, will add more as we go
       schema_map[0] = 0;
       num_children_map[0] = 0;
 
       // num_children_stack and tree_stack hold the current state as we walk though schema
-      std::vector<int> num_children_stack;
-      std::vector<column_pruner*> tree_stack;
       tree_stack.push_back(this);
-      if (schema.size() == 0) {
-        throw std::invalid_argument("a root schema element must exist");
-      }
-      num_children_stack.push_back(schema[0].num_children);
 
-      uint64_t chunk_index = 0;
+      chunk_index = 0;
+      schema_index = 0;
+    }
+
+    /**
+     * Given a schema from a parquet file create a set of pruning maps to prune columns from the rest of the footer
+     */
+    void filter_schema(const rapids::parquet::format::SchemaElement& schema_item, bool ignore_case) {
+      CUDF_FUNC_RANGE();
+
+      // TODO: remove this unnecesary copy
+      schema_items.push_back(schema_item);
       // We are skipping over the first entry in the schema because it is always the root entry, and
       //  we already processed it
-      for (uint64_t schema_index = 1; schema_index < schema.size(); ++schema_index) {
-        auto schema_item = schema[schema_index];
-        // num_children is optional, but is supposed to be set for non-leaf nodes. That said leaf nodes
-        // will have 0 children so we can just default to that.
-        int num_children = 0;
-        if (schema_item.__isset.num_children) {
-          num_children = schema_item.num_children;
-        }
-        std::string name;
-        if (ignore_case) {
-          name = unicode_to_lower(schema_item.name);
-        } else {
-          name = schema_item.name;
-        }
-        column_pruner * found = nullptr;
-        if (tree_stack.back() != nullptr) {
-          // tree_stack can have a nullptr in it if the schema we are looking through
-          // has an entry that does not match the tree
-          auto found_it = tree_stack.back()->children.find(name);
-          if (found_it != tree_stack.back()->children.end()) {
-            found = &(found_it->second);
-            int parent_mapped_schema_index = tree_stack.back()->s_id;
-            ++num_children_map[parent_mapped_schema_index];
+      if (schema_index == 0) {
+        num_children_stack.push_back(schema_item.num_children);
+        ++schema_index;
+        return;
+      }
 
-            int mapped_schema_index = found->s_id;
-            schema_map[mapped_schema_index] = schema_index;
-            num_children_map[mapped_schema_index] = 0;
-          }
-        }
+      // num_children is optional, but is supposed to be set for non-leaf nodes. That said leaf nodes
+      // will have 0 children so we can just default to that.
+      int num_children = 0;
+      if (schema_item.__isset.num_children) {
+        num_children = schema_item.num_children;
+      }
+      std::string name;
+      if (ignore_case) {
+        name = unicode_to_lower(schema_item.name);
+      } else {
+        name = schema_item.name;
+      }
+      column_pruner * found = nullptr;
+      if (tree_stack.back() != nullptr) {
+        // tree_stack can have a nullptr in it if the schema we are looking through
+        // has an entry that does not match the tree
+        auto found_it = tree_stack.back()->children.find(name);
+        if (found_it != tree_stack.back()->children.end()) {
+          found = &(found_it->second);
+          int parent_mapped_schema_index = tree_stack.back()->s_id;
+          ++num_children_map[parent_mapped_schema_index];
 
-        if (schema_item.__isset.type) {
-          // this is a leaf node, it has a primitive type.
-          if (found != nullptr) {
-            int mapped_chunk_index = found->c_id;
-            chunk_map[mapped_chunk_index] = chunk_index;
-          }
-          ++chunk_index;
-        } 
-        // else it is a non-leaf node it is group typed
-        // chunks are only for leaf nodes
-
-        // num_children and if the type is set or not should correspond to each other.
-        //  By convention in parquet they should, but to be on the safe side I keep them
-        //  separate.
-        if (num_children > 0) {
-          tree_stack.push_back(found);
-          num_children_stack.push_back(num_children);
-        } else {
-          // go back up the stack/tree removing children until we hit one with more children
-          bool done = false;
-          while (!done) {
-            int parent_children_left = num_children_stack.back() - 1;
-            if (parent_children_left > 0) {
-              num_children_stack.back() = parent_children_left;
-              done = true;
-            } else {
-              tree_stack.pop_back();
-              num_children_stack.pop_back();
-            }
- 
-            if (tree_stack.size() == 0) {
-              done = true;
-            }
-          }
+          int mapped_schema_index = found->s_id;
+          schema_map[mapped_schema_index] = schema_index;
+          num_children_map[mapped_schema_index] = 0;
         }
       }
 
+      if (schema_item.__isset.type) {
+        // this is a leaf node, it has a primitive type.
+        if (found != nullptr) {
+          int mapped_chunk_index = found->c_id;
+          chunk_map[mapped_chunk_index] = chunk_index;
+        }
+        ++chunk_index;
+      }
+      // else it is a non-leaf node it is group typed
+      // chunks are only for leaf nodes
+
+      // num_children and if the type is set or not should correspond to each other.
+      //  By convention in parquet they should, but to be on the safe side I keep them
+      //  separate.
+      if (num_children > 0) {
+        tree_stack.push_back(found);
+        num_children_stack.push_back(num_children);
+      } else {
+        // go back up the stack/tree removing children until we hit one with more children
+        bool done = false;
+        while (!done) {
+          int parent_children_left = num_children_stack.back() - 1;
+          if (parent_children_left > 0) {
+            num_children_stack.back() = parent_children_left;
+            done = true;
+          } else {
+            tree_stack.pop_back();
+            num_children_stack.pop_back();
+          }
+
+          if (tree_stack.size() == 0) {
+            done = true;
+          }
+        }
+      }
+      ++schema_index;
+    }
+
+    column_pruning_maps get_maps() {
       // If there is a column that is missing from this file we need to compress the gather maps
       //  so there are no gaps
       std::vector<int> final_schema_map;
@@ -452,14 +400,29 @@ static std::vector<rapids::parquet::format::RowGroup> filter_groups(rapids::parq
 using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
 using ThriftProtocol = apache::thrift::protocol::TProtocol;
 
-class transport_protocol : public apache::thrift::protocol::ProtocolListener {
+class transport_protocol : public rapids::parquet::format::FileMetaDataListener {
 public:
-  virtual void on_start(const char* msg){
-    nvtxRangePush(msg);
+  virtual void on_schema(const rapids::parquet::format::SchemaElement& se){
+    std::cout << "on_schema" << std::endl;
+    _pruner->filter_schema(se, _ignore_case);
   }
-  virtual void on_end(){
-    nvtxRangePop();
+
+  virtual void on_key_value(const rapids::parquet::format::KeyValue& kv){
+    std::cout << "on_key_value" << std::endl;
   }
+  virtual void on_row_group(const rapids::parquet::format::RowGroup& kv){
+    std::cout << "on_row_group" << std::endl;
+  }
+  virtual void on_column_order(const rapids::parquet::format::ColumnOrder& kv){
+    std::cout << "on_column_order" << std::endl;
+  }
+
+  //virtual void on_start(const char* msg){
+  //  nvtxRangePush(msg);
+  //}
+  //virtual void on_end(){
+  //  nvtxRangePop();
+  //}
   virtual ~transport_protocol() {
     t_transport.reset();
     t_protocol.reset();
@@ -470,6 +433,14 @@ public:
 
   void reset_transport(uint8_t* buffer, uint32_t len) {
     t_transport->resetBuffer(buffer, len);
+  }
+
+  column_pruner* _pruner;
+  bool _ignore_case;
+
+  void set_pruner(column_pruner* p, bool ignore_case) {
+    _pruner = p;
+    _ignore_case = ignore_case;
   }
 };
 
@@ -499,7 +470,7 @@ transport_protocol* initialize() {
   // Structs in the thrift definition are relatively large (at least 300 bytes).
   // This limits total memory to the same order of magnitude as stringSize.
   tproto_factory.setContainerSizeLimit(1000 * 1000);
-  tp->t_protocol = tproto_factory.getProtocol(tp->t_transport, tp);
+  tp->t_protocol = tproto_factory.getProtocol(tp->t_transport);//, tp);
 
   return tp;
 }
@@ -574,10 +545,10 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
                                                                                     jboolean ignore_case) {
   CUDF_FUNC_RANGE();
   try {
-    auto meta = std::make_unique<rapids::parquet::format::FileMetaData>();
-    // We don't support encrypted parquet...
-    rapids::jni::deserialize_parquet_footer(
-        reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr), meta.get());
+    auto tp = reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr);
+
+    // special meta that can takes a FileMetaDataListener
+    auto meta = std::make_unique<rapids::parquet::format::FileMetaData>(tp);
 
     // Get the filter for the columns first...
     cudf::jni::native_jstringArray n_filter_col_names(env, filter_col_names);
@@ -586,7 +557,15 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     rapids::jni::column_pruner pruner(n_filter_col_names.as_cpp_vector(),
             std::vector(n_num_children.begin(), n_num_children.end()),
             parent_num_children);
-    auto filter = pruner.filter_schema(meta->schema, ignore_case);
+
+    // set the pruner in our listener
+    tp->set_pruner(&pruner, ignore_case);
+
+    // this calls read()
+    rapids::jni::deserialize_parquet_footer(tp, meta.get());
+
+    // maybe once on_schema is done this happens?
+    auto filter = pruner.get_maps();
 
     // start by filtering the schema and the chunks
     std::size_t new_schema_size = filter.schema_map.size();
@@ -594,7 +573,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     for (std::size_t i = 0; i < new_schema_size; ++i) {
       int orig_index = filter.schema_map[i];
       int new_num_children = filter.schema_num_children[i];
-      new_schema[i] = meta->schema[orig_index];
+      new_schema[i] = pruner.schema_items[orig_index];
       new_schema[i].num_children = new_num_children;
     }
     meta->schema = std::move(new_schema);
@@ -617,56 +596,62 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
 }
 
 JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFilter(JNIEnv * env, jclass,
-                                                                                    jlong buffer,
-                                                                                    jlong buffer_length,
                                                                                     jlong part_offset,
                                                                                     jlong part_length,
                                                                                     jobjectArray filter_col_names,
                                                                                     jintArray num_children,
                                                                                     jint parent_num_children,
                                                                                     jboolean ignore_case) {
-  CUDF_FUNC_RANGE();
-  try {
-    auto meta = std::make_unique<rapids::parquet::format::FileMetaData>();
-    uint32_t len = static_cast<uint32_t>(buffer_length);
-    // We don't support encrypted parquet...
-    rapids::jni::deserialize_parquet_footer(reinterpret_cast<uint8_t*>(buffer), len, meta.get());
+  return 0;
+  //CUDF_FUNC_RANGE();
+  //try {
+  //  auto tp = reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr);
+  //  auto meta = std::make_unique<rapids::parquet::format::FileMetaData>(tp);
+  //  uint32_t len = static_cast<uint32_t>(buffer_length);
 
-    // Get the filter for the columns first...
-    cudf::jni::native_jstringArray n_filter_col_names(env, filter_col_names);
-    cudf::jni::native_jintArray n_num_children(env, num_children);
+  //  // We don't support encrypted parquet...
+  //  rapids::jni::deserialize_parquet_footer(tp, meta.get());
 
-    rapids::jni::column_pruner pruner(n_filter_col_names.as_cpp_vector(),
-            std::vector(n_num_children.begin(), n_num_children.end()),
-            parent_num_children);
-    auto filter = pruner.filter_schema(meta->schema, ignore_case);
+  //  // Get the filter for the columns first...
+  //  cudf::jni::native_jstringArray n_filter_col_names(env, filter_col_names);
+  //  cudf::jni::native_jintArray n_num_children(env, num_children);
 
-    // start by filtering the schema and the chunks
-    std::size_t new_schema_size = filter.schema_map.size();
-    std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
-    for (std::size_t i = 0; i < new_schema_size; ++i) {
-      int orig_index = filter.schema_map[i];
-      int new_num_children = filter.schema_num_children[i];
-      new_schema[i] = meta->schema[orig_index];
-      new_schema[i].num_children = new_num_children;
-    }
-    meta->schema = std::move(new_schema);
-    if (meta->__isset.column_orders) {
-      std::vector<rapids::parquet::format::ColumnOrder> new_order;
-      for (auto it = filter.chunk_map.begin(); it != filter.chunk_map.end(); ++it) {
-        new_order.push_back(meta->column_orders[*it]);
-      }
-      meta->column_orders = std::move(new_order);
-    }
-    // Now we want to filter the columns out of each row group that we care about as we go.
-    if (part_length >= 0) {
-      meta->row_groups = std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
-    }
-    rapids::jni::filter_columns(meta->row_groups, filter.chunk_map);
+  //  rapids::jni::column_pruner pruner(n_filter_col_names.as_cpp_vector(),
+  //          std::vector(n_num_children.begin(), n_num_children.end()),
+  //          parent_num_children);
 
-    return cudf::jni::release_as_jlong(meta);
-  }
-  CATCH_STD(env, 0);
+  //  // call from on_schema
+  //  pruner.filter_schema(meta->schema, ignore_case);
+
+  //  // maybe once on_schema is done this happens?
+  //  auto filter = pruner.get_maps();
+
+  //  // start by filtering the schema and the chunks
+  //  std::size_t new_schema_size = filter.schema_map.size();
+  //  std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
+  //  for (std::size_t i = 0; i < new_schema_size; ++i) {
+  //    int orig_index = filter.schema_map[i];
+  //    int new_num_children = filter.schema_num_children[i];
+  //    new_schema[i] = pruner.schema_items[orig_index];
+  //    new_schema[i].num_children = new_num_children;
+  //  }
+  //  meta->schema = std::move(new_schema);
+  //  if (meta->__isset.column_orders) {
+  //    std::vector<rapids::parquet::format::ColumnOrder> new_order;
+  //    for (auto it = filter.chunk_map.begin(); it != filter.chunk_map.end(); ++it) {
+  //      new_order.push_back(meta->column_orders[*it]);
+  //    }
+  //    meta->column_orders = std::move(new_order);
+  //  }
+  //  // Now we want to filter the columns out of each row group that we care about as we go.
+  //  if (part_length >= 0) {
+  //    meta->row_groups = std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
+  //  }
+  //  rapids::jni::filter_columns(meta->row_groups, filter.chunk_map);
+
+  //  return cudf::jni::release_as_jlong(meta);
+  //}
+  //CATCH_STD(env, 0);
 }
 
 JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_close(JNIEnv * env, jclass,
