@@ -102,27 +102,31 @@ find_library(CUDFJNI_LIB "libcudfjni.a" REQUIRED NO_DEFAULT_PATH
   HINTS "${PROJECT_BINARY_DIR}/../libcudfjni"
 )
 
+# find_library(GPROF_LIB "libprofiler.so" REQUIRED NO_DEFAULT_PATH
+#   HINTS "/usr/lib64"
+# )
+
 # parquet
 find_library(PARQUET_LIB "libparquet.a" REQUIRED NO_DEFAULT_PATH
   HINTS "${PROJECT_BINARY_DIR}/../libcudf-install/lib64"
 )
 
 # Internal parquet headers
-set (GENERATED_PARQUET_INCLUDE
-    "${CUDF_DIR}/cpp/build/_deps/arrow-src/cpp/src/"
-    CACHE STRING "generated parquet thrift headers"
-)
+#set (GENERATED_PARQUET_INCLUDE
+#    "${CUDF_DIR}/cpp/build/_deps/arrow-src/cpp/src/"
+#    CACHE STRING "generated parquet thrift headers"
+#)
 
 # thrift
 find_library(THRIFT_LIB "libthrift.a" REQUIRED NO_DEFAULT_PATH
-    HINTS "${CUDF_DIR}/cpp/build/_deps/arrow-build/thrift_ep-install/lib/"
+  HINTS "${HOME}/thrift/lib/cpp/.libs/"
 )
 
+#"${GENERATED_PARQUET_INCLUDE}"
 set(CUDFJNI_INCLUDE_DIRS
   "${CUDF_DIR}/java/src/main/native/include"
   "${CUDF_DIR}/java/src/main/native/src"
-  "${GENERATED_PARQUET_INCLUDE}"
-  "${CUDF_DIR}/cpp/build/_deps/arrow-build/thrift_ep-install/include/"
+  "${HOME}/thrift/lib/cpp/src"
 )
 
 # ##################################################################################################
@@ -132,6 +136,7 @@ add_library(
   spark_rapids_jni SHARED
   src/RowConversionJni.cpp
   src/NativeParquetJni.cpp
+  src/parquet_types.cpp
   src/row_conversion.cu
 )
 
@@ -173,11 +178,11 @@ if(PER_THREAD_DEFAULT_STREAM)
   target_compile_definitions(spark_rapids_jni PUBLIC CUDA_API_PER_THREAD_DEFAULT_STREAM)
 endif()
 
+#${GPROF_LIB}
 target_link_libraries(
   spark_rapids_jni PRIVATE
   -Wl,--whole-archive
     ${CUDFJNI_LIB}
-    cudf::cudf
     ${PARQUET_LIB}
     ${THRIFT_LIB}
   -Wl,--no-whole-archive

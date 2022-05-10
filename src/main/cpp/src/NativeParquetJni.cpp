@@ -29,7 +29,7 @@
 #include <thrift/transport/TBufferTransports.h>
 
 #include <cudf/detail/nvtx/ranges.hpp>
-#include <generated/parquet_types.h>
+#include <parquet_types.h>
 
 #include "cudf_jni_apis.hpp"
 #include "jni_utils.hpp"
@@ -119,7 +119,7 @@ public:
     /**
      * Given a schema from a parquet file create a set of pruning maps to prune columns from the rest of the footer
      */
-    column_pruning_maps filter_schema(std::vector<parquet::format::SchemaElement> & schema, bool ignore_case) {
+    column_pruning_maps filter_schema(std::vector<rapids::parquet::format::SchemaElement> & schema, bool ignore_case) {
       // The following are all covered by follow on work in https://github.com/NVIDIA/spark-rapids-jni/issues/210
       // TODO the java code will fail if there is ambiguity in the names and ignore_case is true
       // so we need to figure that out too.
@@ -386,7 +386,7 @@ static bool invalid_file_offset(long start_index, long pre_start_index, long pre
   return invalid;
 }
 
-static int64_t get_offset(parquet::format::ColumnChunk const& column_chunk) {
+static int64_t get_offset(rapids::parquet::format::ColumnChunk const& column_chunk) {
   auto md = column_chunk.meta_data;
   int64_t offset = md.data_page_offset;
   if (md.__isset.dictionary_page_offset && offset > md.dictionary_page_offset) {
@@ -395,7 +395,7 @@ static int64_t get_offset(parquet::format::ColumnChunk const& column_chunk) {
   return offset;
 }
 
-static std::vector<parquet::format::RowGroup> filter_groups(parquet::format::FileMetaData const& meta, 
+static std::vector<rapids::parquet::format::RowGroup> filter_groups(rapids::parquet::format::FileMetaData const& meta, 
         int64_t part_offset, int64_t part_length) {
     CUDF_FUNC_RANGE();
     // This is based off of the java parquet_mr code to find the groups in a range... 
@@ -407,9 +407,9 @@ static std::vector<parquet::format::RowGroup> filter_groups(parquet::format::Fil
         first_column_with_metadata = meta.row_groups[0].columns[0].__isset.meta_data;
     }
 
-    std::vector<parquet::format::RowGroup> filtered_groups;
+    std::vector<rapids::parquet::format::RowGroup> filtered_groups;
     for (uint64_t rg_i = 0; rg_i < num_row_groups; ++rg_i) {
-        parquet::format::RowGroup const& row_group = meta.row_groups[rg_i];
+        rapids::parquet::format::RowGroup const& row_group = meta.row_groups[rg_i];
         int64_t total_size = 0;
         int64_t start_index;
         auto column_chunk = row_group.columns[0];
@@ -436,7 +436,7 @@ static std::vector<parquet::format::RowGroup> filter_groups(parquet::format::Fil
       } else {
         auto num_columns = row_group.columns.size();
         for (uint64_t cc_i = 0; cc_i < num_columns; ++cc_i) {
-            parquet::format::ColumnChunk const& col = row_group.columns[cc_i];
+            rapids::parquet::format::ColumnChunk const& col = row_group.columns[cc_i];
             total_size += col.meta_data.total_compressed_size;
         }
       }
@@ -452,7 +452,19 @@ static std::vector<parquet::format::RowGroup> filter_groups(parquet::format::Fil
 using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
 using ThriftProtocol = apache::thrift::protocol::TProtocol;
 
-struct transport_protocol {
+class transport_protocol : public apache::thrift::protocol::ProtocolListener {
+public:
+  virtual void on_start(const char* msg){
+    nvtxRangePush(msg);
+  }
+  virtual void on_end(){
+    nvtxRangePop();
+  }
+  virtual ~transport_protocol() {
+    t_transport.reset();
+    t_protocol.reset();
+  }
+
   std::shared_ptr<ThriftBuffer> t_transport;
   std::shared_ptr<ThriftProtocol> t_protocol;
 
@@ -469,13 +481,13 @@ transport_protocol* initialize() {
   conf->setMaxMessageSize(std::numeric_limits<int>::max());
   auto tmem_transport = new ThriftBuffer(
     nullptr,
-    ThriftBuffer::defaultSize,
+    0,
     ThriftBuffer::OBSERVE,
     conf);
   #else
   auto tmem_transport = new ThriftBuffer(
     nullptr,
-    ThriftBuffer::defaultSize);
+    0);
   #endif
 
   auto tp = new transport_protocol();
@@ -487,12 +499,23 @@ transport_protocol* initialize() {
   // Structs in the thrift definition are relatively large (at least 300 bytes).
   // This limits total memory to the same order of magnitude as stringSize.
   tproto_factory.setContainerSizeLimit(1000 * 1000);
-  tp->t_protocol = tproto_factory.getProtocol(tp->t_transport);
+  tp->t_protocol = tproto_factory.getProtocol(tp->t_transport, tp);
 
   return tp;
 }
 
-void deserialize_parquet_footer(uint8_t * buffer, uint32_t len, parquet::format::FileMetaData * meta) {
+void deserialize_parquet_footer(transport_protocol* tp, rapids::parquet::format::FileMetaData * meta) {
+  CUDF_FUNC_RANGE();
+  try {
+    meta->read(tp->t_protocol.get());
+  } catch (std::exception& e) {
+    std::stringstream ss;
+    ss << "Couldn't deserialize thrift: " << e.what() << "\n";
+    throw std::runtime_error(ss.str());
+  }
+}
+
+void deserialize_parquet_footer(uint8_t * buffer, uint32_t len, rapids::parquet::format::FileMetaData * meta) {
   CUDF_FUNC_RANGE();
 
   auto tp = initialize();
@@ -509,10 +532,10 @@ void deserialize_parquet_footer(uint8_t * buffer, uint32_t len, parquet::format:
   }
 }
 
-void filter_columns(std::vector<parquet::format::RowGroup> & groups, std::vector<int> & chunk_filter) {
+void filter_columns(std::vector<rapids::parquet::format::RowGroup> & groups, std::vector<int> & chunk_filter) {
   CUDF_FUNC_RANGE();
   for (auto group_it = groups.begin(); group_it != groups.end(); ++group_it) {
-    std::vector<parquet::format::ColumnChunk> new_chunks;
+    std::vector<rapids::parquet::format::ColumnChunk> new_chunks;
     for (auto it = chunk_filter.begin(); it != chunk_filter.end(); ++it) {
       new_chunks.push_back(group_it->columns[*it]);
     }
@@ -541,6 +564,58 @@ JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_delete(JNI
   delete tp;
 }
 
+JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFilter2(JNIEnv * env, jclass,
+                                                                                    jlong tpaddr,
+                                                                                    jlong part_offset,
+                                                                                    jlong part_length,
+                                                                                    jobjectArray filter_col_names,
+                                                                                    jintArray num_children,
+                                                                                    jint parent_num_children,
+                                                                                    jboolean ignore_case) {
+  CUDF_FUNC_RANGE();
+  try {
+    auto meta = std::make_unique<rapids::parquet::format::FileMetaData>();
+    // We don't support encrypted parquet...
+    rapids::jni::deserialize_parquet_footer(
+        reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr), meta.get());
+
+    // Get the filter for the columns first...
+    cudf::jni::native_jstringArray n_filter_col_names(env, filter_col_names);
+    cudf::jni::native_jintArray n_num_children(env, num_children);
+
+    rapids::jni::column_pruner pruner(n_filter_col_names.as_cpp_vector(),
+            std::vector(n_num_children.begin(), n_num_children.end()),
+            parent_num_children);
+    auto filter = pruner.filter_schema(meta->schema, ignore_case);
+
+    // start by filtering the schema and the chunks
+    std::size_t new_schema_size = filter.schema_map.size();
+    std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
+    for (std::size_t i = 0; i < new_schema_size; ++i) {
+      int orig_index = filter.schema_map[i];
+      int new_num_children = filter.schema_num_children[i];
+      new_schema[i] = meta->schema[orig_index];
+      new_schema[i].num_children = new_num_children;
+    }
+    meta->schema = std::move(new_schema);
+    if (meta->__isset.column_orders) {
+      std::vector<rapids::parquet::format::ColumnOrder> new_order;
+      for (auto it = filter.chunk_map.begin(); it != filter.chunk_map.end(); ++it) {
+        new_order.push_back(meta->column_orders[*it]);
+      }
+      meta->column_orders = std::move(new_order);
+    }
+    // Now we want to filter the columns out of each row group that we care about as we go.
+    if (part_length >= 0) {
+      meta->row_groups = std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
+    }
+    rapids::jni::filter_columns(meta->row_groups, filter.chunk_map);
+
+    return cudf::jni::release_as_jlong(meta);
+  }
+  CATCH_STD(env, 0);
+}
+
 JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFilter(JNIEnv * env, jclass,
                                                                                     jlong buffer,
                                                                                     jlong buffer_length,
@@ -552,7 +627,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
                                                                                     jboolean ignore_case) {
   CUDF_FUNC_RANGE();
   try {
-    auto meta = std::make_unique<parquet::format::FileMetaData>();
+    auto meta = std::make_unique<rapids::parquet::format::FileMetaData>();
     uint32_t len = static_cast<uint32_t>(buffer_length);
     // We don't support encrypted parquet...
     rapids::jni::deserialize_parquet_footer(reinterpret_cast<uint8_t*>(buffer), len, meta.get());
@@ -568,7 +643,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
 
     // start by filtering the schema and the chunks
     std::size_t new_schema_size = filter.schema_map.size();
-    std::vector<parquet::format::SchemaElement> new_schema(new_schema_size);
+    std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
     for (std::size_t i = 0; i < new_schema_size; ++i) {
       int orig_index = filter.schema_map[i];
       int new_num_children = filter.schema_num_children[i];
@@ -577,7 +652,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     }
     meta->schema = std::move(new_schema);
     if (meta->__isset.column_orders) {
-      std::vector<parquet::format::ColumnOrder> new_order;
+      std::vector<rapids::parquet::format::ColumnOrder> new_order;
       for (auto it = filter.chunk_map.begin(); it != filter.chunk_map.end(); ++it) {
         new_order.push_back(meta->column_orders[*it]);
       }
@@ -597,7 +672,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
 JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_close(JNIEnv * env, jclass,
                                                                             jlong handle) {
   try {
-    parquet::format::FileMetaData * ptr = reinterpret_cast<parquet::format::FileMetaData *>(handle);
+    rapids::parquet::format::FileMetaData * ptr = reinterpret_cast<rapids::parquet::format::FileMetaData *>(handle);
     delete ptr;
   }
   CATCH_STD(env, );
@@ -606,7 +681,7 @@ JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_close(JNIE
 JNIEXPORT jlong JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_getNumRows(JNIEnv * env, jclass,
                                                                                  jlong handle) {
   try {
-    parquet::format::FileMetaData * ptr = reinterpret_cast<parquet::format::FileMetaData *>(handle);
+    rapids::parquet::format::FileMetaData * ptr = reinterpret_cast<rapids::parquet::format::FileMetaData *>(handle);
     long ret = 0;
     for(auto it = ptr->row_groups.begin(); it != ptr->row_groups.end(); ++it) {
       ret = ret + it->num_rows;
@@ -619,7 +694,7 @@ JNIEXPORT jlong JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_getNumRow
 JNIEXPORT jlong JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_getNumColumns(JNIEnv * env, jclass,
                                                                                      jlong handle) {
   try {
-    parquet::format::FileMetaData * ptr = reinterpret_cast<parquet::format::FileMetaData *>(handle);
+    rapids::parquet::format::FileMetaData * ptr = reinterpret_cast<rapids::parquet::format::FileMetaData *>(handle);
     int ret = 0;
     if (ptr->schema.size() > 0) {
       if (ptr->schema[0].__isset.num_children) {
@@ -635,7 +710,7 @@ JNIEXPORT jobject JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_seriali
                                                                                              jlong handle) {
   CUDF_FUNC_RANGE();
   try {
-    parquet::format::FileMetaData * meta = reinterpret_cast<parquet::format::FileMetaData *>(handle);
+    rapids::parquet::format::FileMetaData * meta = reinterpret_cast<rapids::parquet::format::FileMetaData *>(handle);
     std::shared_ptr<apache::thrift::transport::TMemoryBuffer> transportOut(
             new apache::thrift::transport::TMemoryBuffer());
     apache::thrift::protocol::TCompactProtocolFactoryT<apache::thrift::transport::TMemoryBuffer> factory;

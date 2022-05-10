@@ -34,3 +34,6 @@ RUN cd /usr/local && wget https://boostorg.jfrog.io/artifactory/main/release/1.7
   ./b2 install --prefix=/usr/local --with-filesystem --with-system && \
    cd /usr/local && \
    rm -rf boost_1_79_0
+
+RUN yum -y install gperftools automake libtool
+RUN rm -rf thrift && git clone https://github.com/abellina/thrift.git && cd thrift && git checkout protocol_listener && ./bootstrap.sh && ./configure && make lib -j21
