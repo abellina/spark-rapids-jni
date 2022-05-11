@@ -137,8 +137,7 @@ public:
     //auto num_row_groups = meta.row_groups.size();
     int64_t pre_start_index;
     int64_t pre_compressed_size;
-    int64_t _part_offset;
-    int64_t _part_length;
+
     bool first_column_with_metadata;
     uint64_t row_groups_so_far;
     std::vector<rapids::parquet::format::RowGroup> filtered_groups;
@@ -380,6 +379,9 @@ private:
     int s_id;
     // Column chunk and Column order ID
     int c_id;
+
+    int64_t _part_offset;
+    int64_t _part_length;
 };
 
 static bool invalid_file_offset(long start_index, long pre_start_index, long pre_compressed_size) {
