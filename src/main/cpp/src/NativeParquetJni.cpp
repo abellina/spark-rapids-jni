@@ -150,6 +150,7 @@ public:
 
       // TODO: remove this unnecesary copy
       schema_items.push_back(schema_item);
+      std::cout << "sitems: " << schema_items.size() << std::endl;
       // We are skipping over the first entry in the schema because it is always the root entry, and
       //  we already processed it
       if (schema_index == 0) {
@@ -170,6 +171,7 @@ public:
       } else {
         name = schema_item.name;
       }
+      std::cout << "got name " << name << std::endl;
       column_pruner * found = nullptr;
       if (tree_stack.back() != nullptr) {
         // tree_stack can have a nullptr in it if the schema we are looking through
@@ -185,15 +187,18 @@ public:
           num_children_map[mapped_schema_index] = 0;
         }
       }
+      std::cout << "found? " << (found != nullptr) << std::endl;
 
       if (schema_item.__isset.type) {
         // this is a leaf node, it has a primitive type.
         if (found != nullptr) {
           int mapped_chunk_index = found->c_id;
           chunk_map[mapped_chunk_index] = chunk_index;
+          std::cout << "mapped_chunk_index: " << mapped_chunk_index << std::endl;
         }
         ++chunk_index;
       }
+      std::cout << "chunk_index: " << chunk_index << std::endl;
       // else it is a non-leaf node it is group typed
       // chunks are only for leaf nodes
 
@@ -225,6 +230,7 @@ public:
     }
 
     column_pruning_maps get_maps() {
+      std::cout << "getting maps" << std::endl;
       // If there is a column that is missing from this file we need to compress the gather maps
       //  so there are no gaps
       std::vector<int> final_schema_map;
@@ -232,6 +238,7 @@ public:
       for (auto it = schema_map.begin(); it != schema_map.end(); ++it) {
         final_schema_map.push_back(it->second);
       }
+      std::cout << "final schema map " << final_schema_map.size() << std::endl;
 
       std::vector<int> final_num_children_map;
       final_num_children_map.reserve(num_children_map.size());
@@ -403,7 +410,7 @@ using ThriftProtocol = apache::thrift::protocol::TProtocol;
 class transport_protocol : public rapids::parquet::format::FileMetaDataListener {
 public:
   virtual void on_schema(const rapids::parquet::format::SchemaElement& se){
-    std::cout << "on_schema" << std::endl;
+    std::cout << "on_schema" << se.name << std::endl;
     _pruner->filter_schema(se, _ignore_case);
   }
 

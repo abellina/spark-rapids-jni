@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <ostream>
+#include <iostream>
 
 #include <thrift/TToString.h>
 
@@ -7112,18 +7113,19 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
       case 7:
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
-            //this->column_orders.clear();
+            this->column_orders.clear();
             uint32_t _size200;
             ::apache::thrift::protocol::TType _etype203;
             xfer += iprot->readListBegin(_etype203, _size200);
-            //this->column_orders.resize(_size200);
-            ColumnOrder co;
+            this->column_orders.resize(_size200);
+            //ColumnOrder co;
             uint32_t _i204;
             for (_i204 = 0; _i204 < _size200; ++_i204)
             {
-              xfer += co.read(iprot);
-              on_column_order(co);
-              //xfer += this->column_orders[_i204].read(iprot);
+              std::cout << "ColumnOrder: " << _i204 << std::endl;
+              //xfer += co.read(iprot);
+              xfer += this->column_orders[_i204].read(iprot);
+              on_column_order(this->column_orders[_i204]);
             }
             xfer += iprot->readListEnd();
           }
