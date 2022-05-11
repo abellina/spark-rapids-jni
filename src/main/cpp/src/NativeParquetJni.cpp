@@ -94,6 +94,34 @@ struct column_pruning_maps {
   std::vector<int> chunk_map;
 };
 
+
+static bool invalid_file_offset(long start_index, long pre_start_index, long pre_compressed_size) {
+  bool invalid = false;
+  // checking the first rowGroup
+  if (pre_start_index == 0 && start_index != 4) {
+    invalid = true;
+    return invalid;
+  }
+
+  //calculate start index for other blocks
+  int64_t min_start_index = pre_start_index + pre_compressed_size;
+  if (start_index < min_start_index) {
+    // a bad offset detected, try first column's offset
+    // can not use minStartIndex in case of padding
+    invalid = true;
+  }
+
+  return invalid;
+}
+
+static int64_t get_offset(rapids::parquet::format::ColumnChunk const& column_chunk) {
+  auto md = column_chunk.meta_data;
+  int64_t offset = md.data_page_offset;
+  if (md.__isset.dictionary_page_offset && offset > md.dictionary_page_offset) {
+    offset = md.dictionary_page_offset;
+  }
+  return offset;
+}
 /**
  * This class will handle processing column pruning for a schema. It is written as a class because
  * of JNI we are sending the names of the columns as a depth first list, like parquet does internally.
@@ -384,33 +412,6 @@ private:
     int64_t _part_length;
 };
 
-static bool invalid_file_offset(long start_index, long pre_start_index, long pre_compressed_size) {
-  bool invalid = false;
-  // checking the first rowGroup
-  if (pre_start_index == 0 && start_index != 4) {
-    invalid = true;
-    return invalid;
-  }
-
-  //calculate start index for other blocks
-  int64_t min_start_index = pre_start_index + pre_compressed_size;
-  if (start_index < min_start_index) {
-    // a bad offset detected, try first column's offset
-    // can not use minStartIndex in case of padding
-    invalid = true;
-  }
-
-  return invalid;
-}
-
-static int64_t get_offset(rapids::parquet::format::ColumnChunk const& column_chunk) {
-  auto md = column_chunk.meta_data;
-  int64_t offset = md.data_page_offset;
-  if (md.__isset.dictionary_page_offset && offset > md.dictionary_page_offset) {
-    offset = md.dictionary_page_offset;
-  }
-  return offset;
-}
 
 
 using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
@@ -426,7 +427,7 @@ public:
   }
   virtual void on_row_group(const rapids::parquet::format::RowGroup& rg){
     std::cout << "on_row_group" << std::endl;
-    _pruner->filter_groups(rg)
+    _pruner->filter_groups(rg);
   }
   virtual void on_column_order(const rapids::parquet::format::ColumnOrder& co){
     std::cout << "on_column_order" << std::endl;
