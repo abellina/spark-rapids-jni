@@ -277,6 +277,11 @@ public:
 
     void filter_groups(const rapids::parquet::format::RowGroup& row_group) {
      CUDF_FUNC_RANGE();
+     if (_part_length <= 0) {
+       filtered_groups.push_back(row_group);
+       std::cout << "not filterting row groups: " << filtered_groups.size() << std::endl;
+       return;
+     }
      if (row_groups_so_far++ == 0) {
        first_column_with_metadata = row_group.columns[0].__isset.meta_data;
      }
@@ -314,7 +319,8 @@ public:
      if (mid_point >= _part_offset && mid_point < (_part_offset + _part_length)) {
        filtered_groups.push_back(row_group);
      }
-  }
+     std::cout << "filtered_groups: " << filtered_groups.size() << std::endl;
+    }
 
     column_pruning_maps get_maps() {
       std::cout << "getting maps" << std::endl;
