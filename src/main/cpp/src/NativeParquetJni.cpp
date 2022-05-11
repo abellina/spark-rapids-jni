@@ -141,15 +141,23 @@ public:
             _part_offset(part_offset),
             _part_length(part_length) {
       add_depth_first(names, num_children, parent_num_children);
+      std::cout << "column_pruner with names=" << names.size() << std::endl;
+      for (uint64_t i = 0; i < names.size(); ++i) {
+        std::cout << "cp for " << names[i] << std::endl;
+      }
       init();
     }
 
-    column_pruner(int s_id, int c_id): children(), s_id(s_id), c_id(c_id) {
+    column_pruner(int s_id, int c_id): children(), s_id(s_id), c_id(c_id),
+      _part_offset(0), _part_length(0) {
       init();
+      std::cout << "different constructor1" << std::endl;
     }
 
-    column_pruner(): children(), s_id(0), c_id(-1) {
+    column_pruner(): children(), s_id(0), c_id(-1),
+      _part_offset(0), _part_length(0) {
       init();
+      std::cout << "different constructor2" << std::endl;
     }
 
     std::map<int, int, std::less<int>> chunk_map;
@@ -169,15 +177,11 @@ public:
     bool first_column_with_metadata;
     uint64_t row_groups_so_far;
     std::vector<rapids::parquet::format::RowGroup> filtered_groups;
+    std::vector<rapids::parquet::format::ColumnOrder> column_orders;
+    std::vector<rapids::parquet::format::KeyValue> key_values;
 
     void init() {
       CUDF_FUNC_RANGE();
-      // Start off with 0 children in the root, will add more as we go
-      schema_map[0] = 0;
-      num_children_map[0] = 0;
-
-      // num_children_stack and tree_stack hold the current state as we walk though schema
-      tree_stack.push_back(this);
 
       chunk_index = 0;
       schema_index = 0;
@@ -196,10 +200,17 @@ public:
 
       // TODO: remove this unnecesary copy
       schema_items.push_back(schema_item);
-      std::cout << "sitems: " << schema_items.size() << std::endl;
+      //std::cout << "sitems: " << schema_items.size() << std::endl;
       // We are skipping over the first entry in the schema because it is always the root entry, and
       //  we already processed it
       if (schema_index == 0) {
+        // Start off with 0 children in the root, will add more as we go
+        schema_map[0] = 0;
+        num_children_map[0] = 0;
+
+        // num_children_stack and tree_stack hold the current state as we walk though schema
+        tree_stack.push_back(this);
+
         num_children_stack.push_back(schema_item.num_children);
         ++schema_index;
         return;
@@ -211,14 +222,19 @@ public:
       if (schema_item.__isset.num_children) {
         num_children = schema_item.num_children;
       }
+
+      nvtxRangePush("to_lower");
       std::string name;
       if (ignore_case) {
         name = unicode_to_lower(schema_item.name);
       } else {
         name = schema_item.name;
       }
-      std::cout << "got name " << name << std::endl;
+
+      nvtxRangePop();
+
       column_pruner * found = nullptr;
+      nvtxRangePush("find column_pruner");
       if (tree_stack.back() != nullptr) {
         // tree_stack can have a nullptr in it if the schema we are looking through
         // has an entry that does not match the tree
@@ -233,24 +249,26 @@ public:
           num_children_map[mapped_schema_index] = 0;
         }
       }
-      std::cout << "found? " << (found != nullptr) << std::endl;
+      nvtxRangePop();
+
 
       if (schema_item.__isset.type) {
         // this is a leaf node, it has a primitive type.
         if (found != nullptr) {
           int mapped_chunk_index = found->c_id;
           chunk_map[mapped_chunk_index] = chunk_index;
-          std::cout << "mapped_chunk_index: " << mapped_chunk_index << std::endl;
+          //std::cout << "mapped_chunk_index: " << mapped_chunk_index << std::endl;
         }
         ++chunk_index;
       }
-      std::cout << "chunk_index: " << chunk_index << std::endl;
+      //std::cout << "chunk_index: " << chunk_index << std::endl;
       // else it is a non-leaf node it is group typed
       // chunks are only for leaf nodes
 
       // num_children and if the type is set or not should correspond to each other.
       //  By convention in parquet they should, but to be on the safe side I keep them
       //  separate.
+      nvtxRangePush("end");
       if (num_children > 0) {
         tree_stack.push_back(found);
         num_children_stack.push_back(num_children);
@@ -272,14 +290,25 @@ public:
           }
         }
       }
+      nvtxRangePop();
       ++schema_index;
+    }
+
+    void on_column_order(const rapids::parquet::format::ColumnOrder& co) {
+      CUDF_FUNC_RANGE();
+      column_orders.push_back(co);
+    }
+
+    void on_key_value(const rapids::parquet::format::KeyValue& kv) {
+      CUDF_FUNC_RANGE();
+      key_values.push_back(kv);
     }
 
     void filter_groups(const rapids::parquet::format::RowGroup& row_group) {
      CUDF_FUNC_RANGE();
      if (_part_length <= 0) {
        filtered_groups.push_back(row_group);
-       std::cout << "not filterting row groups: " << filtered_groups.size() << std::endl;
+       //std::cout << "not filterting row groups: " << filtered_groups.size() << std::endl;
        return;
      }
      if (row_groups_so_far++ == 0) {
@@ -319,7 +348,7 @@ public:
      if (mid_point >= _part_offset && mid_point < (_part_offset + _part_length)) {
        filtered_groups.push_back(row_group);
      }
-     std::cout << "filtered_groups: " << filtered_groups.size() << std::endl;
+     //std::cout << "filtered_groups: " << filtered_groups.size() << std::endl;
     }
 
     column_pruning_maps get_maps() {
@@ -428,15 +457,17 @@ public:
   virtual void on_schema(const rapids::parquet::format::SchemaElement& se){
     _pruner->filter_schema(se, _ignore_case);
   }
+
   virtual void on_key_value(const rapids::parquet::format::KeyValue& kv){
-    std::cout << "on_key_value" << std::endl;
+    _pruner->on_key_value(kv);
   }
   virtual void on_row_group(const rapids::parquet::format::RowGroup& rg){
-    std::cout << "on_row_group" << std::endl;
     _pruner->filter_groups(rg);
   }
+
+  // NOT called right now
   virtual void on_column_order(const rapids::parquet::format::ColumnOrder& co){
-    std::cout << "on_column_order" << std::endl;
+    _pruner->on_column_order(co);
   }
 
   //virtual void on_start(const char* msg){
@@ -568,6 +599,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
   CUDF_FUNC_RANGE();
   try {
     auto tp = reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr);
+    std::cout <<"part_offset: " << part_offset << " part_length: " << part_length << std::endl;
 
     // special meta that can takes a FileMetaDataListener
     auto meta = std::make_unique<rapids::parquet::format::FileMetaData>(tp);
@@ -590,6 +622,7 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     // maybe once on_schema is done this happens?
     auto filter = pruner.get_maps();
 
+    nvtxRangePush("filter schema");
     // start by filtering the schema and the chunks
     std::size_t new_schema_size = filter.schema_map.size();
     std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
@@ -600,15 +633,25 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
       new_schema[i].num_children = new_num_children;
     }
     meta->schema = std::move(new_schema);
-    if (meta->__isset.column_orders) {
+    nvtxRangePop();
+
+    nvtxRangePush("set column orders");
+    if (pruner.column_orders.size() > 0) {
       std::vector<rapids::parquet::format::ColumnOrder> new_order;
       for (auto it = filter.chunk_map.begin(); it != filter.chunk_map.end(); ++it) {
-        new_order.push_back(meta->column_orders[*it]);
+        new_order.push_back(pruner.column_orders[*it]);
       }
+      meta->__isset.column_orders = true;
       meta->column_orders = std::move(new_order);
     }
+    nvtxRangePop();
+
+    nvtxRangePush("set row_groups");
     // Now we want to filter the columns out of each row group that we care about as we go.
     meta->row_groups = std::move(pruner.filtered_groups);
+    meta->key_value_metadata = std::move(pruner.key_values);
+    nvtxRangePop();
+
     //std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
     rapids::jni::filter_columns(meta->row_groups, filter.chunk_map);
 

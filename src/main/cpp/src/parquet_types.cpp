@@ -7037,6 +7037,16 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
             SchemaElement se;
             for (_i189 = 0; _i189 < _size185; ++_i189)
             {
+              se.__isset.type = false;
+              se.__isset.type_length = false;
+              se.__isset.repetition_type = false;
+              se.__isset.num_children = false;
+              se.__isset.converted_type = false;
+              se.__isset.scale = false;
+              se.__isset.precision =false;
+              se.__isset.field_id=false;
+              se.__isset.logicalType=false;
+
               xfer += se.read(iprot);
               on_schema(se);
               //xfer += this->schema[_i189].read(iprot);
@@ -7065,9 +7075,15 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
             xfer += iprot->readListBegin(_etype193, _size190);
             //this->row_groups.resize(_size190);
             uint32_t _i194;
+
             RowGroup rg;
             for (_i194 = 0; _i194 < _size190; ++_i194)
             {
+              rg.__isset.sorting_columns = false;
+              rg.__isset.file_offset = false;
+              rg.__isset.total_compressed_size = false;
+              rg.__isset.ordinal= false;
+
               xfer += rg.read(iprot);
               on_row_group(rg);
               //xfer += this->row_groups[_i194].read(iprot);
@@ -7091,6 +7107,7 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
             KeyValue kv;
             for (_i199 = 0; _i199 < _size195; ++_i199)
             {
+              kv.__isset.value = false;
               xfer += kv.read(iprot);
               on_key_value(kv);
               //xfer += this->key_value_metadata[_i199].read(iprot);
@@ -7122,7 +7139,6 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
             uint32_t _i204;
             for (_i204 = 0; _i204 < _size200; ++_i204)
             {
-              std::cout << "ColumnOrder: " << _i204 << std::endl;
               //xfer += co.read(iprot);
               xfer += this->column_orders[_i204].read(iprot);
               on_column_order(this->column_orders[_i204]);
