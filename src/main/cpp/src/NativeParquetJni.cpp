@@ -107,7 +107,11 @@ public:
      */
     column_pruner(const std::vector<std::string> & names, 
             const std::vector<int> & num_children, 
-            int parent_num_children): children(), s_id(0), c_id(-1) {
+            int parent_num_children,
+            int64_t part_offset,
+            int64_t part_length): children(), s_id(0), c_id(-1),
+            _part_offset(part_offset),
+            _part_length(part_length) {
       add_depth_first(names, num_children, parent_num_children);
       init();
     }
@@ -129,6 +133,16 @@ public:
     uint64_t chunk_index;
     uint64_t schema_index;
 
+    // This is based off of the java parquet_mr code to find the groups in a range...
+    //auto num_row_groups = meta.row_groups.size();
+    int64_t pre_start_index;
+    int64_t pre_compressed_size;
+    int64_t _part_offset;
+    int64_t _part_length;
+    bool first_column_with_metadata;
+    uint64_t row_groups_so_far;
+    std::vector<rapids::parquet::format::RowGroup> filtered_groups;
+
     void init() {
       CUDF_FUNC_RANGE();
       // Start off with 0 children in the root, will add more as we go
@@ -140,6 +154,11 @@ public:
 
       chunk_index = 0;
       schema_index = 0;
+
+      pre_start_index = 0;
+      pre_compressed_size = 0;
+      first_column_with_metadata = true;
+      row_groups_so_far = 0;
     }
 
     /**
@@ -228,6 +247,49 @@ public:
       }
       ++schema_index;
     }
+
+    void filter_groups(const rapids::parquet::format::RowGroup& row_group) {
+     CUDF_FUNC_RANGE();
+     if (row_groups_so_far++ == 0) {
+       first_column_with_metadata = row_group.columns[0].__isset.meta_data;
+     }
+     int64_t total_size = 0;
+     int64_t start_index;
+     auto column_chunk = row_group.columns[0];
+     if (first_column_with_metadata) {
+       start_index = get_offset(column_chunk);
+     } else {
+       //the file_offset of first block always holds the truth, while other blocks don't :
+       //see PARQUET-2078 for details
+       start_index = row_group.file_offset;
+       if (invalid_file_offset(start_index, pre_start_index, pre_compressed_size)) {
+         //first row group's offset is always 4
+         if (pre_start_index == 0) {
+           start_index = 4;
+         } else {
+           // use minStartIndex(imprecise in case of padding, but good enough for filtering)
+           start_index = pre_start_index + pre_compressed_size;
+         }
+       }
+       pre_start_index = start_index;
+       pre_compressed_size = row_group.total_compressed_size;
+     }
+     if (row_group.__isset.total_compressed_size) {
+        total_size = row_group.total_compressed_size;
+     } else {
+        auto num_columns = row_group.columns.size();
+        for (uint64_t cc_i = 0; cc_i < num_columns; ++cc_i) {
+            rapids::parquet::format::ColumnChunk const& col = row_group.columns[cc_i];
+            total_size += col.meta_data.total_compressed_size;
+        }
+     }
+     int64_t mid_point = start_index + total_size / 2;
+     if (mid_point >= _part_offset && mid_point < (_part_offset + _part_length)) {
+       filtered_groups.push_back(row_group);
+     }
+  }
+}
+
 
     column_pruning_maps get_maps() {
       std::cout << "getting maps" << std::endl;
@@ -350,59 +412,6 @@ static int64_t get_offset(rapids::parquet::format::ColumnChunk const& column_chu
   return offset;
 }
 
-static std::vector<rapids::parquet::format::RowGroup> filter_groups(rapids::parquet::format::FileMetaData const& meta, 
-        int64_t part_offset, int64_t part_length) {
-    CUDF_FUNC_RANGE();
-    // This is based off of the java parquet_mr code to find the groups in a range... 
-    auto num_row_groups = meta.row_groups.size();
-    int64_t pre_start_index = 0;
-    int64_t pre_compressed_size = 0;
-    bool first_column_with_metadata = true;
-    if (num_row_groups > 0) {
-        first_column_with_metadata = meta.row_groups[0].columns[0].__isset.meta_data;
-    }
-
-    std::vector<rapids::parquet::format::RowGroup> filtered_groups;
-    for (uint64_t rg_i = 0; rg_i < num_row_groups; ++rg_i) {
-        rapids::parquet::format::RowGroup const& row_group = meta.row_groups[rg_i];
-        int64_t total_size = 0;
-        int64_t start_index;
-        auto column_chunk = row_group.columns[0];
-        if (first_column_with_metadata) {
-            start_index = get_offset(column_chunk);
-        } else {
-          //the file_offset of first block always holds the truth, while other blocks don't :
-          //see PARQUET-2078 for details
-          start_index = row_group.file_offset;
-          if (invalid_file_offset(start_index, pre_start_index, pre_compressed_size)) {
-            //first row group's offset is always 4
-            if (pre_start_index == 0) {
-              start_index = 4;
-            } else {
-              // use minStartIndex(imprecise in case of padding, but good enough for filtering)
-              start_index = pre_start_index + pre_compressed_size;
-            }
-          }
-          pre_start_index = start_index;
-          pre_compressed_size = row_group.total_compressed_size;
-      }
-      if (row_group.__isset.total_compressed_size) {
-        total_size = row_group.total_compressed_size;
-      } else {
-        auto num_columns = row_group.columns.size();
-        for (uint64_t cc_i = 0; cc_i < num_columns; ++cc_i) {
-            rapids::parquet::format::ColumnChunk const& col = row_group.columns[cc_i];
-            total_size += col.meta_data.total_compressed_size;
-        }
-      }
-
-      int64_t mid_point = start_index + total_size / 2;
-      if (mid_point >= part_offset && mid_point < (part_offset + part_length)) {
-        filtered_groups.push_back(row_group);
-      }
-    }
-    return filtered_groups;
-}
 
 using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
 using ThriftProtocol = apache::thrift::protocol::TProtocol;
@@ -410,17 +419,16 @@ using ThriftProtocol = apache::thrift::protocol::TProtocol;
 class transport_protocol : public rapids::parquet::format::FileMetaDataListener {
 public:
   virtual void on_schema(const rapids::parquet::format::SchemaElement& se){
-    std::cout << "on_schema" << se.name << std::endl;
     _pruner->filter_schema(se, _ignore_case);
   }
-
   virtual void on_key_value(const rapids::parquet::format::KeyValue& kv){
     std::cout << "on_key_value" << std::endl;
   }
-  virtual void on_row_group(const rapids::parquet::format::RowGroup& kv){
+  virtual void on_row_group(const rapids::parquet::format::RowGroup& rg){
     std::cout << "on_row_group" << std::endl;
+    _pruner->filter_groups(rg)
   }
-  virtual void on_column_order(const rapids::parquet::format::ColumnOrder& kv){
+  virtual void on_column_order(const rapids::parquet::format::ColumnOrder& co){
     std::cout << "on_column_order" << std::endl;
   }
 
@@ -563,12 +571,13 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
 
     rapids::jni::column_pruner pruner(n_filter_col_names.as_cpp_vector(),
             std::vector(n_num_children.begin(), n_num_children.end()),
-            parent_num_children);
+            parent_num_children,
+            part_offset, part_length);
 
     // set the pruner in our listener
     tp->set_pruner(&pruner, ignore_case);
 
-    // this calls read()
+    // this calls read() and all the callbacks
     rapids::jni::deserialize_parquet_footer(tp, meta.get());
 
     // maybe once on_schema is done this happens?
@@ -592,9 +601,8 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
       meta->column_orders = std::move(new_order);
     }
     // Now we want to filter the columns out of each row group that we care about as we go.
-    if (part_length >= 0) {
-      meta->row_groups = std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
-    }
+    meta->row_groups = std::move(pruner.filtered_groups);
+    //std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
     rapids::jni::filter_columns(meta->row_groups, filter.chunk_map);
 
     return cudf::jni::release_as_jlong(meta);
