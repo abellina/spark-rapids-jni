@@ -288,8 +288,6 @@ public:
        filtered_groups.push_back(row_group);
      }
   }
-}
-
 
     column_pruning_maps get_maps() {
       std::cout << "getting maps" << std::endl;
