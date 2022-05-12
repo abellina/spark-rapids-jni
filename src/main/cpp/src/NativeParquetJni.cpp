@@ -20,6 +20,7 @@
 #include <vector>
 #include <cwctype>
 #include <iostream>
+#include <unordered_set>
 
 // TCompactProtocol requires some #defines to work right.
 // This came from the parquet code itself...
@@ -39,7 +40,7 @@ namespace rapids {
 namespace jni {
 
 struct schema_info {
-  int schema_gather_ix;
+  uint64_t schema_gather_ix;
   int schema_num_children;
 };
 
@@ -160,6 +161,7 @@ public:
     }
 
     std::map<int, int, std::less<int>> chunk_map;
+    std::unordered_set<int> interesting_chunks;
     std::map<int, schema_info, std::less<int>> schema_map;
     std::vector<int> num_children_stack;
     std::vector<column_pruner*> tree_stack;
@@ -252,6 +254,7 @@ public:
         if (found != nullptr) {
           int mapped_chunk_index = found->c_id;
           chunk_map[mapped_chunk_index] = chunk_index;
+          interesting_chunks.insert(chunk_index);
         }
         ++chunk_index;
       }
@@ -444,6 +447,13 @@ public:
   }
   virtual void on_row_group(const rapids::parquet::format::RowGroup& rg){
     _pruner->filter_groups(rg);
+  }
+  virtual bool on_row_group_column(uint32_t ix) {
+    bool should_skip =
+      _pruner->interesting_chunks.find(ix) == _pruner->interesting_chunks.end();
+    nvtxRangePush(should_skip ? "skip" : "keep");
+    nvtxRangePop();
+    return !should_skip;
   }
   // NOT called right now
   virtual void on_column_order(const rapids::parquet::format::ColumnOrder& co){
