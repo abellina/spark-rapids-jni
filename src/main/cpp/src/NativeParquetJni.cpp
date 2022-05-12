@@ -38,6 +38,11 @@
 namespace rapids {
 namespace jni {
 
+struct schema_info {
+  int schema_gather_ix;
+  int schema_num_children;
+};
+
 /**
  * Convert a string to lower case. It uses std::tolower per character which has limitations
  * and may not produce the exact same result as the JVM does. This is probably good enough
@@ -84,11 +89,11 @@ std::string unicode_to_lower(std::string const& input) {
  */
 struct column_pruning_maps {
   // gather map for pulling out items from the schema
-  std::vector<int> schema_map;
   // Each SchemaElement also includes the number of children in it. This allows the vector
   // to be interpreted as a tree flattened depth first. These are the new values for num
   // children after the schema is gathered.
-  std::vector<int> schema_num_children;
+  std::vector<schema_info> schema_map;
+
   // There are several places where a struct is stored only for a leaf column (like a column chunk)
   // This holds the gather map for those cases.
   std::vector<int> chunk_map;
@@ -141,28 +146,21 @@ public:
             _part_offset(part_offset),
             _part_length(part_length) {
       add_depth_first(names, num_children, parent_num_children);
-      std::cout << "column_pruner with names=" << names.size() << std::endl;
-      for (uint64_t i = 0; i < names.size(); ++i) {
-        std::cout << "cp for " << names[i] << std::endl;
-      }
       init();
     }
 
     column_pruner(int s_id, int c_id): children(), s_id(s_id), c_id(c_id),
       _part_offset(0), _part_length(0) {
       init();
-      std::cout << "different constructor1" << std::endl;
     }
 
     column_pruner(): children(), s_id(0), c_id(-1),
       _part_offset(0), _part_length(0) {
       init();
-      std::cout << "different constructor2" << std::endl;
     }
 
     std::map<int, int, std::less<int>> chunk_map;
-    std::map<int, int, std::less<int>> schema_map;
-    std::map<int, int, std::less<int>> num_children_map;
+    std::map<int, schema_info, std::less<int>> schema_map;
     std::vector<int> num_children_stack;
     std::vector<column_pruner*> tree_stack;
     std::vector<rapids::parquet::format::SchemaElement> schema_items;
@@ -200,13 +198,11 @@ public:
 
       // TODO: remove this unnecesary copy
       schema_items.push_back(schema_item);
-      //std::cout << "sitems: " << schema_items.size() << std::endl;
       // We are skipping over the first entry in the schema because it is always the root entry, and
       //  we already processed it
       if (schema_index == 0) {
         // Start off with 0 children in the root, will add more as we go
-        schema_map[0] = 0;
-        num_children_map[0] = 0;
+        schema_map[0] = {0, 0};
 
         // num_children_stack and tree_stack hold the current state as we walk though schema
         tree_stack.push_back(this);
@@ -242,11 +238,10 @@ public:
         if (found_it != tree_stack.back()->children.end()) {
           found = &(found_it->second);
           int parent_mapped_schema_index = tree_stack.back()->s_id;
-          ++num_children_map[parent_mapped_schema_index];
+          ++(schema_map[parent_mapped_schema_index].schema_num_children);
 
           int mapped_schema_index = found->s_id;
-          schema_map[mapped_schema_index] = schema_index;
-          num_children_map[mapped_schema_index] = 0;
+          schema_map[mapped_schema_index] = {schema_index, 0};
         }
       }
       nvtxRangePop();
@@ -257,11 +252,9 @@ public:
         if (found != nullptr) {
           int mapped_chunk_index = found->c_id;
           chunk_map[mapped_chunk_index] = chunk_index;
-          //std::cout << "mapped_chunk_index: " << mapped_chunk_index << std::endl;
         }
         ++chunk_index;
       }
-      //std::cout << "chunk_index: " << chunk_index << std::endl;
       // else it is a non-leaf node it is group typed
       // chunks are only for leaf nodes
 
@@ -308,7 +301,6 @@ public:
      CUDF_FUNC_RANGE();
      if (_part_length <= 0) {
        filtered_groups.push_back(row_group);
-       //std::cout << "not filterting row groups: " << filtered_groups.size() << std::endl;
        return;
      }
      if (row_groups_so_far++ == 0) {
@@ -348,24 +340,15 @@ public:
      if (mid_point >= _part_offset && mid_point < (_part_offset + _part_length)) {
        filtered_groups.push_back(row_group);
      }
-     //std::cout << "filtered_groups: " << filtered_groups.size() << std::endl;
     }
 
     column_pruning_maps get_maps() {
-      std::cout << "getting maps" << std::endl;
       // If there is a column that is missing from this file we need to compress the gather maps
       //  so there are no gaps
-      std::vector<int> final_schema_map;
+      std::vector<schema_info> final_schema_map;
       final_schema_map.reserve(schema_map.size());
       for (auto it = schema_map.begin(); it != schema_map.end(); ++it) {
         final_schema_map.push_back(it->second);
-      }
-      std::cout << "final schema map " << final_schema_map.size() << std::endl;
-
-      std::vector<int> final_num_children_map;
-      final_num_children_map.reserve(num_children_map.size());
-      for (auto it = num_children_map.begin(); it != num_children_map.end(); ++it) {
-        final_num_children_map.push_back(it->second);
       }
 
       std::vector<int> final_chunk_map;
@@ -375,7 +358,6 @@ public:
       }
 
       return column_pruning_maps{std::move(final_schema_map),
-          std::move(final_num_children_map),
           std::move(final_chunk_map)};
     }
 
@@ -457,17 +439,27 @@ public:
   virtual void on_schema(const rapids::parquet::format::SchemaElement& se){
     _pruner->filter_schema(se, _ignore_case);
   }
-
   virtual void on_key_value(const rapids::parquet::format::KeyValue& kv){
     _pruner->on_key_value(kv);
   }
   virtual void on_row_group(const rapids::parquet::format::RowGroup& rg){
     _pruner->filter_groups(rg);
   }
-
   // NOT called right now
   virtual void on_column_order(const rapids::parquet::format::ColumnOrder& co){
     _pruner->on_column_order(co);
+  }
+  virtual void on_created_by() {
+    CUDF_FUNC_RANGE();
+  }
+  virtual void on_encryption_algo() {
+    CUDF_FUNC_RANGE();
+  }
+  virtual void on_signing_key_meta() {
+    CUDF_FUNC_RANGE();
+  }
+  virtual void on_just_skip() {
+    CUDF_FUNC_RANGE();
   }
 
   //virtual void on_start(const char* msg){
@@ -599,7 +591,6 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
   CUDF_FUNC_RANGE();
   try {
     auto tp = reinterpret_cast<rapids::jni::transport_protocol*>(tpaddr);
-    std::cout <<"part_offset: " << part_offset << " part_length: " << part_length << std::endl;
 
     // special meta that can takes a FileMetaDataListener
     auto meta = std::make_unique<rapids::parquet::format::FileMetaData>(tp);
@@ -619,7 +610,6 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     // this calls read() and all the callbacks
     rapids::jni::deserialize_parquet_footer(tp, meta.get());
 
-    // maybe once on_schema is done this happens?
     auto filter = pruner.get_maps();
 
     nvtxRangePush("filter schema");
@@ -627,8 +617,8 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     std::size_t new_schema_size = filter.schema_map.size();
     std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
     for (std::size_t i = 0; i < new_schema_size; ++i) {
-      int orig_index = filter.schema_map[i];
-      int new_num_children = filter.schema_num_children[i];
+      int orig_index = filter.schema_map[i].schema_gather_ix;
+      int new_num_children = filter.schema_map[i].schema_num_children;
       new_schema[i] = pruner.schema_items[orig_index];
       new_schema[i].num_children = new_num_children;
     }
@@ -652,7 +642,6 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     meta->key_value_metadata = std::move(pruner.key_values);
     nvtxRangePop();
 
-    //std::move(rapids::jni::filter_groups(*meta, part_offset, part_length));
     rapids::jni::filter_columns(meta->row_groups, filter.chunk_map);
 
     return cudf::jni::release_as_jlong(meta);

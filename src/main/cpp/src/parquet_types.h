@@ -2782,6 +2782,10 @@ class FileMetaDataListener {
     virtual void on_key_value(const KeyValue& kv) = 0;
     virtual void on_row_group(const RowGroup& kv) = 0;
     virtual void on_column_order(const ColumnOrder& kv) = 0;
+    virtual void on_created_by() = 0;
+    virtual void on_encryption_algo() = 0;
+    virtual void on_signing_key_meta() = 0;
+    virtual void on_just_skip() = 0;
 };
 
 class FileMetaData : public virtual ::apache::thrift::TBase {
