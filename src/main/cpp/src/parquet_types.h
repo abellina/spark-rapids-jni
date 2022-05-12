@@ -258,6 +258,20 @@ class FileMetaData;
 
 class FileCryptoMetaData;
 
+
+class FileMetaDataListener {
+  public:
+    virtual void on_schema(const SchemaElement& se) = 0;
+    virtual void on_key_value(const KeyValue& kv) = 0;
+    virtual void on_row_group(const RowGroup& kv) = 0;
+    virtual bool on_row_group_column(uint32_t ix) = 0;
+    virtual void on_column_order(const ColumnOrder& kv) = 0;
+    virtual void on_created_by() = 0;
+    virtual void on_encryption_algo() = 0;
+    virtual void on_signing_key_meta() = 0;
+    virtual void on_just_skip() = 0;
+};
+
 typedef struct _Statistics__isset {
   _Statistics__isset() : max(false), min(false), null_count(false), distinct_count(false), max_value(false), min_value(false) {}
   bool max :1;
@@ -2364,7 +2378,10 @@ class RowGroup : public virtual ::apache::thrift::TBase {
 
   bool operator < (const RowGroup & ) const;
 
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot) {
+    throw std::runtime_error("no need to call this one");
+  }
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot,  FileMetaDataListener* listener);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
   virtual void printTo(std::ostream& out) const;
@@ -2776,18 +2793,6 @@ typedef struct _FileMetaData__isset {
   bool footer_signing_key_metadata :1;
 } _FileMetaData__isset;
 
-class FileMetaDataListener {
-  public:
-    virtual void on_schema(const SchemaElement& se) = 0;
-    virtual void on_key_value(const KeyValue& kv) = 0;
-    virtual void on_row_group(const RowGroup& kv) = 0;
-    virtual void on_column_order(const ColumnOrder& kv) = 0;
-    virtual void on_created_by() = 0;
-    virtual void on_encryption_algo() = 0;
-    virtual void on_signing_key_meta() = 0;
-    virtual void on_just_skip() = 0;
-};
-
 class FileMetaData : public virtual ::apache::thrift::TBase {
  public:
 
@@ -2810,6 +2815,19 @@ class FileMetaData : public virtual ::apache::thrift::TBase {
   }
   void on_column_order(const ColumnOrder& co){
     _listener->on_column_order(co);
+  }
+  void on_created_by(){
+    _listener->on_created_by();
+  }
+
+  void on_encryption_algo(){
+    _listener->on_encryption_algo();
+  }
+  void on_signing_key_meta(){
+    _listener->on_signing_key_meta();
+  }
+  void on_just_skip(){
+    _listener->on_just_skip();
   }
 
   virtual ~FileMetaData() noexcept;

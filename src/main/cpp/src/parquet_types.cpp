@@ -5641,8 +5641,471 @@ std::ostream& operator<<(std::ostream& out, const RowGroup& obj)
   return out;
 }
 
+uint32_t skip_struct_start(::apache::thrift::protocol::TProtocol* iprot) {
+  return 0;
+}
 
-uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t skip_struct_end(::apache::thrift::protocol::TProtocol* iprot) {
+  return 0;
+}
+
+uint32_t skip_field_begin(::apache::thrift::protocol::TProtocol* iprot,
+  ::apache::thrift::protocol::TType& ftype, int16_t& fid) {
+  uint32_t result = 0;
+  int8_t type;
+  result += iprot->readByte(type);
+  ftype = (::apache::thrift::protocol::TType)type;
+  if (ftype == ::apache::thrift::protocol::T_STOP) {
+    fid = 0;
+    return result;
+  }
+  result += iprot->readI16(fid);
+  return result;
+}
+
+uint32_t skip_field_end(::apache::thrift::protocol::TProtocol* iprot) {
+  return 0;
+}
+
+uint32_t skip_string(::apache::thrift::protocol::TProtocol* iprot) {
+  int32_t rsize = 0;
+  int32_t size;
+  rsize += iprot->readI32(size);
+  if (size == 0){
+    return rsize;
+  }
+  // Catch error cases
+  if (size < 0) {
+    throw std::runtime_error("negative size");
+  }
+  iprot->getTransport()->consume(rsize + (uint32_t)size);
+  return rsize + (uint32_t)size;
+}
+
+uint32_t skip_long(::apache::thrift::protocol::TProtocol* iprot) {
+  iprot->getTransport()->consume(8);
+  return 8;
+}
+
+uint32_t skip_int(::apache::thrift::protocol::TProtocol* iprot) {
+  iprot->getTransport()->consume(4);
+  return 4;
+}
+
+uint32_t skip_list_of_int(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  uint32_t list_size;
+  ::apache::thrift::protocol::TType _etype115;
+  xfer += iprot->readListBegin(_etype115, list_size);
+
+  for (uint32_t i = 0; i < list_size; ++i)
+  {
+    xfer += skip_int(iprot);
+  }
+
+  xfer += iprot->readListEnd();
+  return xfer;
+}
+
+uint32_t skip_key_value_metadata_list(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // KeyValue
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // key
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2: // value
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t skip_statistics(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // KeyValue
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // max
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2: // min
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 3: // null count
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 4: // distinct count
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 5: // max_value
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 6: // min_value
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t skip_list_of_encoding_stats(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // PageEncodingStats
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // page_type
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2: // encoding
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 3: // count
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t skip_list_of_string(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  uint32_t list_size;
+  ::apache::thrift::protocol::TType _etype115;
+  xfer += iprot->readListBegin(_etype115, list_size);
+
+  for (uint32_t i = 0; i < list_size; ++i)
+  {
+    xfer += skip_string(iprot);
+  }
+
+  xfer += iprot->readListEnd();
+  return xfer;
+}
+
+uint32_t skip_meta_data(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // ColumnMetaData
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // type
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2: // encodings
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          xfer += skip_list_of_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 3: // path_in_schema
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          xfer += skip_list_of_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 4: // codec
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 5: // num_values
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 6: // total_uncompressed_size
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 7: // total_compressed_size
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 8: // key_value_metadata
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          xfer += skip_key_value_metadata_list(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 9: // data_page_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 10: // index_page_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 11: // dictionary_page_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 12: // statistics
+        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
+          xfer += skip_statistics(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 13: // encoding_stats
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          xfer += skip_list_of_encoding_stats(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 14: // bloom_filter_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t skip_encryption_with_column(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // EncryptionWithColumnKey
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // path_in_schema
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          xfer += skip_list_of_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2: // key_metadata
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t skip_crypto_meta_data(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // ColumnCryptoMetaData
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // encryption_with_footer_key
+        xfer += iprot->skip(ftype);
+        break;
+      case 2: // encryption_with_column_key
+        xfer += skip_encryption_with_column(iprot);
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t column_chunk_skip(::apache::thrift::protocol::TProtocol* iprot) {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+  xfer += skip_struct_start(iprot);  // ColumnChunk
+  while (true) {
+    xfer += skip_field_begin(iprot, ftype, fid);   // First field
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid) {
+      case 1: // file_path
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2: // file_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 3: // meta_data
+        xfer += skip_meta_data(iprot);
+      case 4: // offset_index_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 5: // offset_index_length
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 6: // column_index_offset
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += skip_long(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 7: // column_index_length
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += skip_int(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 8: // crypto_metadata
+        xfer += skip_crypto_meta_data(iprot);
+      case 9: // encrypted_column_metadata
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += skip_string(iprot);
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+    }
+    xfer += skip_field_end(iprot);
+  }
+  xfer += skip_struct_end(iprot);
+  return xfer;
+}
+
+uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot, FileMetaDataListener* listener) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -5677,9 +6140,13 @@ uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot) {
             uint32_t _i128;
             for (_i128 = 0; _i128 < _size124; ++_i128)
             {
-              xfer += this->columns[_i128].read(iprot);
+              if (listener->on_row_group_column(_i128)) {
+                xfer += this->columns[_i128].read(iprot);
+              } else {
+                //skip the chunk if we don't want it
+                xfer += column_chunk_skip(iprot);
+              }
             }
-            xfer += iprot->readListEnd();
           }
           isset_columns = true;
         } else {
@@ -7084,7 +7551,7 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
               rg.__isset.total_compressed_size = false;
               rg.__isset.ordinal= false;
 
-              xfer += rg.read(iprot);
+              xfer += rg.read(iprot, _listener);
               on_row_group(rg);
               //xfer += this->row_groups[_i194].read(iprot);
             }
