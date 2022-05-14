@@ -94,22 +94,24 @@ public class ParquetFooter implements AutoCloseable {
             ignoreCase));
   }
 
-  public static ParquetFooter readAndFilter(long footerState, HostMemoryBuffer buffer,
+  public static ParquetFooter readAndFilter(long footerStateNotUsed, HostMemoryBuffer buffer,
       long partOffset, long partLength,
       String[] names,
       int[] numChildren,
       int parentNumChildren,
       boolean ignoreCase) {
     // reset the state
+    long footerState = initialize();
     reset(footerState, buffer.getAddress(), buffer.getLength());
-
-    return new ParquetFooter(
+    ParquetFooter res = new ParquetFooter(
         readAndFilter2
             (footerState,
             partOffset, partLength,
             names, numChildren,
             parentNumChildren,
             ignoreCase));
+    delete(footerState);
+    return res;
   }
 
   // returns handle to a dynamic TMemoryBuffer

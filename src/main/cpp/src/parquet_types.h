@@ -270,6 +270,8 @@ class FileMetaDataListener {
     virtual void on_encryption_algo() = 0;
     virtual void on_signing_key_meta() = 0;
     virtual void on_just_skip() = 0;
+    virtual void start_range(const char* rg) = 0;
+    virtual void stop_range() = 0;
 };
 
 typedef struct _Statistics__isset {

@@ -51,7 +51,7 @@ struct schema_info {
  */
 std::string unicode_to_lower(std::string const& input) {
   // get the size of the wide character result
-    std::size_t wide_size = std::mbstowcs(nullptr, input.data(), 0);
+  std::size_t wide_size = std::mbstowcs(nullptr, input.data(), 0);
   if (wide_size < 0) {
     throw std::invalid_argument("invalid character sequence");
   }
@@ -196,7 +196,7 @@ public:
      * Given a schema from a parquet file create a set of pruning maps to prune columns from the rest of the footer
      */
     void filter_schema(const rapids::parquet::format::SchemaElement& schema_item, bool ignore_case) {
-      CUDF_FUNC_RANGE();
+      //CUDF_FUNC_RANGE();
 
       // TODO: remove this unnecesary copy
       schema_items.push_back(schema_item);
@@ -221,7 +221,6 @@ public:
         num_children = schema_item.num_children;
       }
 
-      nvtxRangePush("to_lower");
       std::string name;
       if (ignore_case) {
         name = unicode_to_lower(schema_item.name);
@@ -229,10 +228,7 @@ public:
         name = schema_item.name;
       }
 
-      nvtxRangePop();
-
       column_pruner * found = nullptr;
-      nvtxRangePush("find column_pruner");
       if (tree_stack.back() != nullptr) {
         // tree_stack can have a nullptr in it if the schema we are looking through
         // has an entry that does not match the tree
@@ -246,8 +242,6 @@ public:
           schema_map[mapped_schema_index] = {schema_index, 0};
         }
       }
-      nvtxRangePop();
-
 
       if (schema_item.__isset.type) {
         // this is a leaf node, it has a primitive type.
@@ -264,7 +258,6 @@ public:
       // num_children and if the type is set or not should correspond to each other.
       //  By convention in parquet they should, but to be on the safe side I keep them
       //  separate.
-      nvtxRangePush("end");
       if (num_children > 0) {
         tree_stack.push_back(found);
         num_children_stack.push_back(num_children);
@@ -286,17 +279,16 @@ public:
           }
         }
       }
-      nvtxRangePop();
       ++schema_index;
     }
 
     void on_column_order(const rapids::parquet::format::ColumnOrder& co) {
-      CUDF_FUNC_RANGE();
+      //CUDF_FUNC_RANGE();
       column_orders.push_back(co);
     }
 
     void on_key_value(const rapids::parquet::format::KeyValue& kv) {
-      CUDF_FUNC_RANGE();
+      //CUDF_FUNC_RANGE();
       key_values.push_back(kv);
     }
 
@@ -448,12 +440,11 @@ public:
   virtual void on_row_group(const rapids::parquet::format::RowGroup& rg){
     _pruner->filter_groups(rg);
   }
+
+  // return true to keep
   virtual bool on_row_group_column(uint32_t ix) {
-    bool should_skip =
-      _pruner->interesting_chunks.find(ix) == _pruner->interesting_chunks.end();
-    nvtxRangePush(should_skip ? "skip" : "keep");
-    nvtxRangePop();
-    return !should_skip;
+    return 
+      _pruner->interesting_chunks.find(ix) != _pruner->interesting_chunks.end();
   }
   // NOT called right now
   virtual void on_column_order(const rapids::parquet::format::ColumnOrder& co){
@@ -472,12 +463,14 @@ public:
     CUDF_FUNC_RANGE();
   }
 
-  //virtual void on_start(const char* msg){
-  //  nvtxRangePush(msg);
-  //}
-  //virtual void on_end(){
-  //  nvtxRangePop();
-  //}
+  virtual void start_range(const char* rg){
+    nvtxRangePush(rg);
+  }
+
+  virtual void stop_range(){
+    nvtxRangePop();
+  }
+
   virtual ~transport_protocol() {
     t_transport.reset();
     t_protocol.reset();
