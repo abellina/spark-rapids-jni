@@ -51,6 +51,63 @@ TType getTType(int8_t type) {
 
 namespace rapids { namespace parquet { namespace format {
 
+uint32_t lastFieldId = 0;
+std::stack<int16_t> lastFieldStack;
+
+uint32_t readStructBegin() {
+  lastFieldStack.push(lastFieldId);
+  lastFieldId = 0;
+  return 0;
+}
+
+uint32_t readStructEnd() {
+  lastFieldId = lastFieldStack.top();
+  lastFieldStack.pop();
+  return 0;
+}
+
+uint32_t readFieldBegin(::apache::thrift::protocol::TProtocol* iprot,
+    ::apache::thrift::protocol::TType& fieldType, int16_t& fieldId) {
+  uint32_t rsize = 0;
+  int8_t byte;
+  int8_t type;
+
+  rsize += iprot->readByte(byte);
+  type = (byte & 0x0f);
+
+  // if it's a stop, then we can return immediately, as the struct is over.
+  if (type == ::apache::thrift::protocol::T_STOP) {
+    fieldType = ::apache::thrift::protocol::T_STOP;
+    fieldId = 0;
+    return rsize;
+  }
+
+  // mask off the 4 MSB of the type header. it could contain a field id delta.
+  auto modifier = (int16_t)(((uint8_t)byte & 0xf0) >> 4);
+  if (modifier == 0) {
+    // not a delta, look ahead for the zigzag varint field id.
+    rsize += iprot->readI16(fieldId);
+  } else {
+    fieldId = (int16_t)(lastFieldId + modifier);
+  }
+  fieldType = ::apache::thrift::protocol::getTType(type);
+
+  // no booleans fields in this file
+  //// if this happens to be a boolean field, the value is encoded in the type
+  //if (type == ::apache::thrift::protocol::detail::compact::CT_BOOLEAN_TRUE ||
+  //    type == ::apache::thrift::protocol::detail::compact::CT_BOOLEAN_FALSE) {
+  //  // save the boolean value in a special instance variable.
+  //  boolValue_.hasBoolValue = true;
+  //  boolValue_.boolValue =
+  //    (type == detail::compact::CT_BOOLEAN_TRUE ? true : false);
+  //}
+
+  // push the new field onto the field stack so we can keep the deltas going.
+  lastFieldId = fieldId;
+  return rsize;
+}
+
+
 int _kTypeValues[] = {
   Type::BOOLEAN,
   Type::INT32,
@@ -385,18 +442,18 @@ uint32_t Statistics::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -457,7 +514,7 @@ uint32_t Statistics::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -559,18 +616,18 @@ uint32_t StringType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -578,7 +635,7 @@ uint32_t StringType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -627,18 +684,18 @@ uint32_t UUIDType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -646,7 +703,7 @@ uint32_t UUIDType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -695,18 +752,18 @@ uint32_t MapType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -714,7 +771,7 @@ uint32_t MapType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -763,18 +820,18 @@ uint32_t ListType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -782,7 +839,7 @@ uint32_t ListType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -831,18 +888,18 @@ uint32_t EnumType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -850,7 +907,7 @@ uint32_t EnumType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -899,18 +956,18 @@ uint32_t DateType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -918,7 +975,7 @@ uint32_t DateType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -967,18 +1024,18 @@ uint32_t NullType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -986,7 +1043,7 @@ uint32_t NullType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -1043,11 +1100,11 @@ uint32_t DecimalType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -1056,7 +1113,7 @@ uint32_t DecimalType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1085,7 +1142,7 @@ uint32_t DecimalType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_scale)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -1150,18 +1207,18 @@ uint32_t MilliSeconds::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1169,7 +1226,7 @@ uint32_t MilliSeconds::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -1218,18 +1275,18 @@ uint32_t MicroSeconds::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1237,7 +1294,7 @@ uint32_t MicroSeconds::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -1286,18 +1343,18 @@ uint32_t NanoSeconds::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1305,7 +1362,7 @@ uint32_t NanoSeconds::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -1369,18 +1426,18 @@ uint32_t TimeUnit::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1417,7 +1474,7 @@ uint32_t TimeUnit::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -1500,11 +1557,11 @@ uint32_t TimestampType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -1513,7 +1570,7 @@ uint32_t TimestampType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1542,7 +1599,7 @@ uint32_t TimestampType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_isAdjustedToUTC)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -1615,11 +1672,11 @@ uint32_t TimeType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -1628,7 +1685,7 @@ uint32_t TimeType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1657,7 +1714,7 @@ uint32_t TimeType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_isAdjustedToUTC)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -1730,11 +1787,11 @@ uint32_t IntType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -1743,7 +1800,7 @@ uint32_t IntType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1772,7 +1829,7 @@ uint32_t IntType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_bitWidth)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -1837,18 +1894,18 @@ uint32_t JsonType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1856,7 +1913,7 @@ uint32_t JsonType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -1905,18 +1962,18 @@ uint32_t BsonType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -1924,7 +1981,7 @@ uint32_t BsonType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -2038,18 +2095,18 @@ uint32_t LogicalType::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -2166,7 +2223,7 @@ uint32_t LogicalType::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -2380,11 +2437,11 @@ uint32_t SchemaElement::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -2392,7 +2449,7 @@ uint32_t SchemaElement::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -2491,7 +2548,7 @@ uint32_t SchemaElement::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_name)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -2651,11 +2708,11 @@ uint32_t DataPageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -2666,7 +2723,7 @@ uint32_t DataPageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -2725,7 +2782,7 @@ uint32_t DataPageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_num_values)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -2822,18 +2879,18 @@ uint32_t IndexPageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -2841,7 +2898,7 @@ uint32_t IndexPageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -2903,11 +2960,11 @@ uint32_t DictionaryPageHeader::read(::apache::thrift::protocol::TProtocol* iprot
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -2916,7 +2973,7 @@ uint32_t DictionaryPageHeader::read(::apache::thrift::protocol::TProtocol* iprot
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -2955,7 +3012,7 @@ uint32_t DictionaryPageHeader::read(::apache::thrift::protocol::TProtocol* iprot
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_num_values)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -3066,11 +3123,11 @@ uint32_t DataPageHeaderV2::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -3083,7 +3140,7 @@ uint32_t DataPageHeaderV2::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3162,7 +3219,7 @@ uint32_t DataPageHeaderV2::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_num_values)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -3288,18 +3345,18 @@ uint32_t SplitBlockAlgorithm::read(::apache::thrift::protocol::TProtocol* iprot)
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3307,7 +3364,7 @@ uint32_t SplitBlockAlgorithm::read(::apache::thrift::protocol::TProtocol* iprot)
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -3361,18 +3418,18 @@ uint32_t BloomFilterAlgorithm::read(::apache::thrift::protocol::TProtocol* iprot
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3393,7 +3450,7 @@ uint32_t BloomFilterAlgorithm::read(::apache::thrift::protocol::TProtocol* iprot
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -3450,18 +3507,18 @@ uint32_t XxHash::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3469,7 +3526,7 @@ uint32_t XxHash::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -3523,18 +3580,18 @@ uint32_t BloomFilterHash::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3555,7 +3612,7 @@ uint32_t BloomFilterHash::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -3612,18 +3669,18 @@ uint32_t Uncompressed::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3631,7 +3688,7 @@ uint32_t Uncompressed::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -3685,18 +3742,18 @@ uint32_t BloomFilterCompression::read(::apache::thrift::protocol::TProtocol* ipr
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3717,7 +3774,7 @@ uint32_t BloomFilterCompression::read(::apache::thrift::protocol::TProtocol* ipr
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -3790,11 +3847,11 @@ uint32_t BloomFilterHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -3805,7 +3862,7 @@ uint32_t BloomFilterHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -3850,7 +3907,7 @@ uint32_t BloomFilterHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_numBytes)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -3972,11 +4029,11 @@ uint32_t PageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -3986,7 +4043,7 @@ uint32_t PageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -4065,7 +4122,7 @@ uint32_t PageHeader::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_type)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -4197,11 +4254,11 @@ uint32_t KeyValue::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -4209,7 +4266,7 @@ uint32_t KeyValue::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -4238,7 +4295,7 @@ uint32_t KeyValue::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_key)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -4317,11 +4374,11 @@ uint32_t SortingColumn::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -4331,7 +4388,7 @@ uint32_t SortingColumn::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -4368,7 +4425,7 @@ uint32_t SortingColumn::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_column_idx)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -4455,11 +4512,11 @@ uint32_t PageEncodingStats::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -4469,7 +4526,7 @@ uint32_t PageEncodingStats::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -4510,7 +4567,7 @@ uint32_t PageEncodingStats::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_page_type)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -4647,11 +4704,11 @@ uint32_t ColumnMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -4666,7 +4723,7 @@ uint32_t ColumnMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -4845,7 +4902,7 @@ uint32_t ColumnMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_type)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -5059,18 +5116,18 @@ uint32_t EncryptionWithFooterKey::read(::apache::thrift::protocol::TProtocol* ip
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -5078,7 +5135,7 @@ uint32_t EncryptionWithFooterKey::read(::apache::thrift::protocol::TProtocol* ip
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -5136,11 +5193,11 @@ uint32_t EncryptionWithColumnKey::read(::apache::thrift::protocol::TProtocol* ip
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -5148,7 +5205,7 @@ uint32_t EncryptionWithColumnKey::read(::apache::thrift::protocol::TProtocol* ip
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -5189,7 +5246,7 @@ uint32_t EncryptionWithColumnKey::read(::apache::thrift::protocol::TProtocol* ip
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_path_in_schema)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -5274,18 +5331,18 @@ uint32_t ColumnCryptoMetaData::read(::apache::thrift::protocol::TProtocol* iprot
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -5314,7 +5371,7 @@ uint32_t ColumnCryptoMetaData::read(::apache::thrift::protocol::TProtocol* iprot
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -5424,11 +5481,11 @@ uint32_t ColumnChunk::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -5436,7 +5493,7 @@ uint32_t ColumnChunk::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -5521,7 +5578,7 @@ uint32_t ColumnChunk::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_file_offset)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -5805,10 +5862,9 @@ uint32_t skip_key_value_metadata_list(::apache::thrift::protocol::TProtocol* ipr
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
   //xfer += skip_struct_start(iprot);  // KeyValue
-  std::string throw_away;
-  xfer += iprot->readStructBegin(throw_away);
+  xfer += readStructBegin();
   while (true) {
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -5834,7 +5890,7 @@ uint32_t skip_key_value_metadata_list(::apache::thrift::protocol::TProtocol* ipr
     xfer += skip_field_end(iprot);
   }
   //xfer += skip_struct_end(iprot);
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
 }
 
@@ -5843,10 +5899,9 @@ uint32_t skip_statistics(::apache::thrift::protocol::TProtocol* iprot) {
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
   //xfer += skip_struct_start(iprot);  // KeyValue
-  std::string throw_away;
-  xfer += iprot->readStructBegin(throw_away);
+  xfer += readStructBegin();
   while (true) {
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
     //std::cout << "at skip statistics, ftype: " << ftype << " fid: " << fid << std::endl;
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
@@ -5901,7 +5956,7 @@ uint32_t skip_statistics(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += skip_field_end(iprot);
   }
   //xfer += skip_struct_end(iprot);
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
 }
 
@@ -5910,10 +5965,9 @@ uint32_t skip_encoding_stats(::apache::thrift::protocol::TProtocol* iprot) {
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
   //xfer += skip_struct_start(iprot);  // PageEncodingStats
-  std::string throw_away;
-  xfer += iprot->readStructBegin(throw_away);
+  xfer += readStructBegin();
   while (true) {
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
     //std::cout << "at skip list of encoding stats, ftype: " << ftype << " fid: " << fid << std::endl;
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
@@ -5947,7 +6001,7 @@ uint32_t skip_encoding_stats(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += skip_field_end(iprot);
   }
   //xfer += skip_struct_end(iprot);
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
 }
 uint32_t skip_list_of_encoding_stats(::apache::thrift::protocol::TProtocol* iprot) {
@@ -5990,10 +6044,9 @@ uint32_t skip_meta_data(::apache::thrift::protocol::TProtocol* iprot,  FileMetaD
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
   //xfer += skip_struct_start(iprot);  // ColumnMetaData
-  std::string throw_away;
-  xfer += iprot->readStructBegin(throw_away);
+  xfer += readStructBegin();
   while (true) {
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
     //std::cout << "skip_meta_data, ftype: " << ftype << " fid: " << fid << std::endl;
     //std::cout << "at meta: ftype: " << ftype <<" fid: " << fid << std::endl;
     if (ftype == ::apache::thrift::protocol::T_STOP) {
@@ -6009,18 +6062,18 @@ uint32_t skip_meta_data(::apache::thrift::protocol::TProtocol* iprot,  FileMetaD
         break;
       case 2: // encodings
         if (ftype == ::apache::thrift::protocol::T_LIST) {
-          listener->start_range("skip encodings");
+          //listener->start_range("skip encodings");
           xfer += skip_list_of_int(iprot);
-          listener->stop_range();
+          //listener->stop_range();
         } else {
           xfer += iprot->skip(ftype);
         }
         break;
       case 3: // path_in_schema
         if (ftype == ::apache::thrift::protocol::T_LIST) {
-          listener->start_range("skip path in schema");
+          //listener->start_range("skip path in schema");
           xfer += skip_list_of_string(iprot);
-          listener->stop_range();
+          //listener->stop_range();
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -6085,9 +6138,9 @@ uint32_t skip_meta_data(::apache::thrift::protocol::TProtocol* iprot,  FileMetaD
         break;
       case 12: // statistics
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          listener->start_range("skip_statistics");
+          //listener->start_range("skip_statistics");
           xfer += skip_statistics(iprot);
-          listener->stop_range();
+          //listener->stop_range();
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -6115,7 +6168,7 @@ uint32_t skip_meta_data(::apache::thrift::protocol::TProtocol* iprot,  FileMetaD
     xfer += skip_field_end(iprot);
   }
   //xfer += skip_struct_end(iprot);
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
 }
 
@@ -6124,10 +6177,9 @@ uint32_t skip_encryption_with_column(::apache::thrift::protocol::TProtocol* ipro
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
   //xfer += skip_struct_start(iprot);  // EncryptionWithColumnKey
-  std::string throw_away;
-  xfer += iprot->readStructBegin(throw_away);
+  xfer += readStructBegin();
   while (true) {
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -6153,7 +6205,7 @@ uint32_t skip_encryption_with_column(::apache::thrift::protocol::TProtocol* ipro
     xfer += skip_field_end(iprot);
   }
   //xfer += skip_struct_end(iprot);
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
 }
 
@@ -6162,10 +6214,9 @@ uint32_t skip_crypto_meta_data(::apache::thrift::protocol::TProtocol* iprot) {
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
   //xfer += skip_struct_start(iprot);  // ColumnCryptoMetaData
-  std::string throw_away;
-  xfer += iprot->readStructBegin(throw_away);
+  xfer += readStructBegin();
   while (true) {
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -6183,64 +6234,8 @@ uint32_t skip_crypto_meta_data(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += skip_field_end(iprot);
   }
   //xfer += skip_struct_end(iprot);
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
-}
-
-uint32_t lastFieldId = 0;
-std::stack<int16_t> lastFieldStack;
-
-uint32_t readStructBegin() {
-  lastFieldStack.push(lastFieldId);
-  lastFieldId = 0;
-  return 0;
-}
-
-uint32_t readStructEnd() {
-  lastFieldId = lastFieldStack.top();
-  lastFieldStack.pop();
-  return 0;
-}
-
-uint32_t readFieldBegin(::apache::thrift::protocol::TProtocol* iprot,
-    ::apache::thrift::protocol::TType& fieldType, int16_t& fieldId) {
-  uint32_t rsize = 0;
-  int8_t byte;
-  int8_t type;
-
-  rsize += iprot->readByte(byte);
-  type = (byte & 0x0f);
-
-  // if it's a stop, then we can return immediately, as the struct is over.
-  if (type == ::apache::thrift::protocol::T_STOP) {
-    fieldType = ::apache::thrift::protocol::T_STOP;
-    fieldId = 0;
-    return rsize;
-  }
-
-  // mask off the 4 MSB of the type header. it could contain a field id delta.
-  auto modifier = (int16_t)(((uint8_t)byte & 0xf0) >> 4);
-  if (modifier == 0) {
-    // not a delta, look ahead for the zigzag varint field id.
-    rsize += iprot->readI16(fieldId);
-  } else {
-    fieldId = (int16_t)(lastFieldId + modifier);
-  }
-  fieldType = ::apache::thrift::protocol::getTType(type);
-
-  // no booleans fields in this file
-  //// if this happens to be a boolean field, the value is encoded in the type
-  //if (type == ::apache::thrift::protocol::detail::compact::CT_BOOLEAN_TRUE ||
-  //    type == ::apache::thrift::protocol::detail::compact::CT_BOOLEAN_FALSE) {
-  //  // save the boolean value in a special instance variable.
-  //  boolValue_.hasBoolValue = true;
-  //  boolValue_.boolValue =
-  //    (type == detail::compact::CT_BOOLEAN_TRUE ? true : false);
-  //}
-
-  // push the new field onto the field stack so we can keep the deltas going.
-  lastFieldId = fieldId;
-  return rsize;
 }
 
 uint32_t column_chunk_skip(::apache::thrift::protocol::TProtocol* iprot, FileMetaDataListener* listener) {
@@ -6248,15 +6243,14 @@ uint32_t column_chunk_skip(::apache::thrift::protocol::TProtocol* iprot, FileMet
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
-  std::string throw_away;
-  listener->start_range("readStructBegin");
-  xfer += iprot->readStructBegin(throw_away);  // ColumnChunk
-  listener->stop_range();
+  //listener->start_range("readStructBegin");
+  xfer += readStructBegin();  // ColumnChunk
+  //listener->stop_range();
   while (true) {
   //TODO: it's all here probably
-    listener->start_range("readFieldBegin");
-    xfer += iprot->readFieldBegin(throw_away, ftype, fid);   // First field
-    listener->stop_range();
+    //listener->start_range("readFieldBegin");
+    xfer += readFieldBegin(iprot, ftype, fid);   // First field
+    //listener->stop_range();
     //std::cout << "column_chunk_skip, ftype: " << ftype << " fid: " << fid << std::endl;
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
@@ -6283,9 +6277,9 @@ uint32_t column_chunk_skip(::apache::thrift::protocol::TProtocol* iprot, FileMet
       case 3: // meta_data
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
           //std::cout << "skipping?: " << fid << std::endl;
-          listener->start_range("skip_meta_data");
+          //listener->start_range("skip_meta_data");
           xfer += skip_meta_data(iprot, listener);
-          listener->stop_range();
+         // listener->stop_range();
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -6341,7 +6335,7 @@ uint32_t column_chunk_skip(::apache::thrift::protocol::TProtocol* iprot, FileMet
     }
     xfer += skip_field_end(iprot);
   }
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
   return xfer;
 }
 
@@ -6349,11 +6343,11 @@ uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot, FileMetaDa
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -6363,7 +6357,7 @@ uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot, FileMetaDa
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     //std::cout << "RowGroup::read, ftype: " << ftype << " fid: " << fid << std::endl;
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
@@ -6388,10 +6382,10 @@ uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot, FileMetaDa
                 xfer += this->columns[_i128].read(iprot);
                 listener->stop_range();
               } else {
-                listener->start_range("column_chunk_skip");
+                //listener->start_range("column_chunk_skip");
                 //skip the chunk if we don't want it
                 xfer += column_chunk_skip(iprot, listener);
-                listener->stop_range();
+                //listener->stop_range();
               }
             }
             xfer += iprot->readListEnd();
@@ -6468,7 +6462,7 @@ uint32_t RowGroup::read(::apache::thrift::protocol::TProtocol* iprot, FileMetaDa
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_columns)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -6598,18 +6592,18 @@ uint32_t TypeDefinedOrder::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -6617,7 +6611,7 @@ uint32_t TypeDefinedOrder::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -6671,18 +6665,18 @@ uint32_t ColumnOrder::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -6703,7 +6697,7 @@ uint32_t ColumnOrder::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -6772,11 +6766,11 @@ uint32_t PageLocation::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -6786,7 +6780,7 @@ uint32_t PageLocation::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -6823,7 +6817,7 @@ uint32_t PageLocation::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_offset)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -6902,11 +6896,11 @@ uint32_t OffsetIndex::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -6914,7 +6908,7 @@ uint32_t OffsetIndex::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -6947,7 +6941,7 @@ uint32_t OffsetIndex::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_page_locations)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -7031,11 +7025,11 @@ uint32_t ColumnIndex::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -7046,7 +7040,7 @@ uint32_t ColumnIndex::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -7149,7 +7143,7 @@ uint32_t ColumnIndex::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_null_pages)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -7293,18 +7287,18 @@ uint32_t AesGcmV1::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -7341,7 +7335,7 @@ uint32_t AesGcmV1::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -7431,18 +7425,18 @@ uint32_t AesGcmCtrV1::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -7479,7 +7473,7 @@ uint32_t AesGcmCtrV1::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -7564,18 +7558,18 @@ uint32_t EncryptionAlgorithm::read(::apache::thrift::protocol::TProtocol* iprot)
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -7604,7 +7598,7 @@ uint32_t EncryptionAlgorithm::read(::apache::thrift::protocol::TProtocol* iprot)
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   return xfer;
 }
@@ -7711,11 +7705,11 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -7726,7 +7720,7 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -7893,7 +7887,7 @@ uint32_t FileMetaData::read(::apache::thrift::protocol::TProtocol* iprot) {
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_version)
     throw TProtocolException(TProtocolException::INVALID_DATA);
@@ -8067,11 +8061,11 @@ uint32_t FileCryptoMetaData::read(::apache::thrift::protocol::TProtocol* iprot) 
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
-  std::string fname;
+  
   ::apache::thrift::protocol::TType ftype;
   int16_t fid;
 
-  xfer += iprot->readStructBegin(fname);
+  xfer += readStructBegin();
 
   using ::apache::thrift::protocol::TProtocolException;
 
@@ -8079,7 +8073,7 @@ uint32_t FileCryptoMetaData::read(::apache::thrift::protocol::TProtocol* iprot) 
 
   while (true)
   {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    xfer += readFieldBegin(iprot, ftype, fid);
     if (ftype == ::apache::thrift::protocol::T_STOP) {
       break;
     }
@@ -8108,7 +8102,7 @@ uint32_t FileCryptoMetaData::read(::apache::thrift::protocol::TProtocol* iprot) 
     xfer += iprot->readFieldEnd();
   }
 
-  xfer += iprot->readStructEnd();
+  xfer += readStructEnd();
 
   if (!isset_encryption_algorithm)
     throw TProtocolException(TProtocolException::INVALID_DATA);
