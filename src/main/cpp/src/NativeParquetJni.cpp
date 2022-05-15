@@ -195,11 +195,14 @@ public:
     /**
      * Given a schema from a parquet file create a set of pruning maps to prune columns from the rest of the footer
      */
+    uint32_t final_schema_index = 0;
     void filter_schema(const rapids::parquet::format::SchemaElement& schema_item, bool ignore_case) {
       //CUDF_FUNC_RANGE();
 
       // TODO: remove this unnecesary copy
-      schema_items.push_back(schema_item);
+      //schema_items.push_back(schema_item);
+      // TODO: add schema_items all the time if we have no filters
+
       // We are skipping over the first entry in the schema because it is always the root entry, and
       //  we already processed it
       if (schema_index == 0) {
@@ -240,6 +243,7 @@ public:
 
           int mapped_schema_index = found->s_id;
           schema_map[mapped_schema_index] = {schema_index, 0};
+          schema_items.push_back(schema_item); // we want this column
         }
       }
 
@@ -617,12 +621,18 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
 
     nvtxRangePush("filter schema");
     // start by filtering the schema and the chunks
-    std::size_t new_schema_size = filter.schema_map.size();
-    std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
+    //std::size_t new_schema_size = filter.schema_map.size();
+    // TODO: remove this, it is really just filter.schema_items
+    //std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
     for (std::size_t i = 0; i < new_schema_size; ++i) {
-      int orig_index = filter.schema_map[i].schema_gather_ix;
+      //int orig_index = filter.schema_map[i].schema_gather_ix;
       int new_num_children = filter.schema_map[i].schema_num_children;
-      new_schema[i] = pruner.schema_items[orig_index];
+      //new_schema[i] = pruner.schema_items[orig_index];
+      //TODO: make sure schema_map has the correct size.
+      // if 1 column filtered, size 1
+      // if no columns filtered, size: orig num columns
+      // TODO: remove this copy
+      //new_schema[i] = pruner.schema_items[i];
       new_schema[i].num_children = new_num_children;
     }
     meta->schema = std::move(new_schema);
