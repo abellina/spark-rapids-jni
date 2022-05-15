@@ -624,7 +624,8 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
     //std::size_t new_schema_size = filter.schema_map.size();
     // TODO: remove this, it is really just filter.schema_items
     //std::vector<rapids::parquet::format::SchemaElement> new_schema(new_schema_size);
-    for (std::size_t i = 0; i < new_schema_size; ++i) {
+    //for (std::size_t i = 0; i < new_schema_size; ++i) {
+    for (std::size_t i = 0; i < filter.schema_items.size(); ++i) {
       //int orig_index = filter.schema_map[i].schema_gather_ix;
       int new_num_children = filter.schema_map[i].schema_num_children;
       //new_schema[i] = pruner.schema_items[orig_index];
@@ -633,9 +634,9 @@ JNIEXPORT long JNICALL Java_com_nvidia_spark_rapids_jni_ParquetFooter_readAndFil
       // if no columns filtered, size: orig num columns
       // TODO: remove this copy
       //new_schema[i] = pruner.schema_items[i];
-      new_schema[i].num_children = new_num_children;
+      filter.schema_items[i].num_children = new_num_children;
     }
-    meta->schema = std::move(new_schema);
+    meta->schema = std::move(filter.schema_items);
     nvtxRangePop();
 
     nvtxRangePush("set column orders");
