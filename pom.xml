@@ -75,7 +75,7 @@
 
   <properties>
     <arrow.version>0.15.1</arrow.version>
-    <CPP_PARALLEL_LEVEL>10</CPP_PARALLEL_LEVEL>
+    <CPP_PARALLEL_LEVEL>50</CPP_PARALLEL_LEVEL>
     <GPU_ARCHS>RAPIDS</GPU_ARCHS>
     <CUDF_USE_PER_THREAD_DEFAULT_STREAM>ON</CUDF_USE_PER_THREAD_DEFAULT_STREAM>
     <RMM_LOGGING_LEVEL>OFF</RMM_LOGGING_LEVEL>
@@ -457,7 +457,7 @@
                   <arg value="-DCMAKE_INSTALL_PREFIX=${libcudf.install.path}"/>
                   <arg value="-DCUDF_DEPENDENCY_PIN_MODE=${libcudf.dependency.mode}"/>
                   <arg value="-DCUDA_STATIC_CUFILE=ON"/>
-                  <arg value="-DCUDA_STATIC_RUNTIME=ON"/>
+                  <arg value="-DCUDA_STATIC_RUNTIME=OFF"/>
                   <arg value="-DCUDF_USE_PER_THREAD_DEFAULT_STREAM=${CUDF_USE_PER_THREAD_DEFAULT_STREAM}" />
                   <arg value="-DCUDF_LARGE_STRINGS_DISABLED=ON"/>
                   <arg value="-DCUDF_KVIKIO_REMOTE_IO=OFF"/>
@@ -494,7 +494,7 @@
                   <arg value="${cudf.path}/java/src/main/native"/>
                   <arg value="-DBUILD_SHARED_LIBS=OFF"/>
                   <arg value="-DCUDA_STATIC_CUFILE=ON"/>
-                  <arg value="-DCUDA_STATIC_RUNTIME=ON"/>
+                  <arg value="-DCUDA_STATIC_RUNTIME=OFF"/>
                   <arg value="-DCUDF_JNI_LIBCUDF_STATIC=ON"/>
                   <arg value="-DGPU_ARCHS=${GPU_ARCHS}"/>
                   <arg value="-DCUDF_USE_PER_THREAD_DEFAULT_STREAM=${CUDF_USE_PER_THREAD_DEFAULT_STREAM}"/>

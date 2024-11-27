@@ -281,6 +281,7 @@ target_link_libraries(
     ${ARROW_LIB}
     ${PARQUET_LIB}
     ${THRIFT_LIB}
+    cuda
 )
 rapids_cuda_set_runtime(spark_rapids_jni USE_STATIC ON)
 set_target_properties(spark_rapids_jni PROPERTIES LINK_LANGUAGE "CXX")
