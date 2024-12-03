@@ -149,7 +149,7 @@
     {
       "always_download" : true,
       "git_shallow" : false,
-      "git_tag" : "59a1d08120baeb7ede727f09f7370b29c9c739a1",
+      "git_tag" : "4299ba8a680ab9d35a38733fa7bfc3e9cc531510",
       "git_url" : "https://github.com/abellina/rmm.git",
       "version" : "24.12"
     },
