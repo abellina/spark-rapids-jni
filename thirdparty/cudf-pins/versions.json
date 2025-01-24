@@ -139,8 +139,8 @@
     {
       "always_download" : true,
       "git_shallow" : false,
-      "git_tag" : "d70bd4be2ebe1804313e2bb680fe89c102d72cb7",
-      "git_url" : "https://github.com/rapidsai/rmm.git",
+      "git_tag" : "df113c350df479361e0613b04343e41913b06ab4",
+      "git_url" : "https://github.com/abellina/rmm.git",
       "version" : "25.02"
     },
     "spdlog" : 
