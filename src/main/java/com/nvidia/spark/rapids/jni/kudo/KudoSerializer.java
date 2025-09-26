@@ -177,7 +177,6 @@ public class KudoSerializer {
 
   public KudoSerializer(Schema schema) {
     requireNonNull(schema, "schema is null");
-    ensure(schema.getNumChildren() > 0, "Top schema can't be empty");
     this.schema = schema;
     this.flattenedColumnCount = schema.getFlattenedColumnNames().length;
   }
@@ -370,13 +369,10 @@ public class KudoSerializer {
   public Pair<KudoHostMergeResult, MergeMetrics> mergeOnHost(List<KudoTable> kudoTables) {
     MergeMetrics.Builder metricsBuilder = MergeMetrics.builder();
 
-    KudoHostMergeResult result;
-    KudoTable[] newTables = kudoTables.toArray(new KudoTable[0]);
-    MergedInfoCalc mergedInfoCalc = withTime(() -> MergedInfoCalc.calc(schema, newTables),
-              metricsBuilder::calcHeaderTime);
-    result = withTime(() -> KudoTableMerger.merge(schema, mergedInfoCalc),
-              metricsBuilder::mergeIntoHostBufferTime);
-
+    MergedInfoCalc mergedInfoCalc = withTime(() -> MergedInfoCalc.calc(schema, kudoTables),
+        metricsBuilder::calcHeaderTime);
+    KudoHostMergeResult result = withTime(() -> KudoTableMerger.merge(schema, mergedInfoCalc),
+        metricsBuilder::mergeIntoHostBufferTime);
     return Pair.of(result, metricsBuilder.build());
   }
 

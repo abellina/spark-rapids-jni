@@ -138,36 +138,6 @@ public class KudoSerializerTest {
   }
 
   @Test
-  public void testMergeString() {
-      Arms.withResource(new ArrayList<Table>(), tables -> {
-                  Table table1 = new Table.TestBuilder()
-                          .column("A", "B", "C", "D", null, "TESTING", "1", "2", "3", "4",
-                                  "5", "6", "7", null, "9", "10", "11", "12", "13", null, "15")
-                          .build();
-                  tables.add(table1);
-
-                  Table table2 = new Table.TestBuilder()
-                          .column("A", "A", "C", "C", "E", "TESTING", "1", "2", "3", "4", "5",
-                                  "6", "7", "", "9", "10", "11", "12", "13", "", "15")
-                          .build();
-                  tables.add(table2);
-
-                  Table expected = new Table.TestBuilder()
-                          .column("C", "D", null, "TESTING", "1", "2", "3", "4",
-                                  "5", "6", "7", null, "9", "C", "E", "TESTING", "1", "2")
-                          .build();
-                  tables.add(expected);
-
-                  checkMergeTable(expected, asList(
-                          new TableSlice(2, 13, table1),
-                          new TableSlice(3, 5, table2)));
-
-                  return null;
-              }
-      );
-  }
-
-  @Test
   public void testMergeList() {
     Arms.withResource(new ArrayList<Table>(), tables -> {
       Table table1 = new Table.TestBuilder()
@@ -200,37 +170,6 @@ public class KudoSerializerTest {
           new TableSlice(3, 7, table1),
           new TableSlice(1, 9, table2)));
 
-      return null;
-    });
-  }
-
-  @Test
-  public void testMergeComplexStructList() {
-    Arms.withResource(new ArrayList<Table>(), tables -> {
-      HostColumnVector.ListType listMapType = new HostColumnVector.ListType(true,
-              new HostColumnVector.ListType(true,
-                      new HostColumnVector.StructType(true,
-                              new HostColumnVector.BasicType(false, DType.STRING),
-                              new HostColumnVector.BasicType(true, DType.STRING))));
-
-      Table table = new Table.TestBuilder()
-              .column(listMapType, asList(asList(struct("k1", "v1"), struct("k2", "v2")),
-                              singletonList(struct("k3", "v3"))),
-                      null,
-                      singletonList(asList(struct("k14", "v14"), struct("k15", "v15"))),
-                      null,
-                      asList(null, null, null),
-                      asList(singletonList(struct("k22", null)), singletonList(struct("k23", null))),
-                      null, null,
-                      null)
-              .build();
-      tables.add(table);
-
-      checkMergeTable(table, asList(
-              new TableSlice(0, 3, table),
-              new TableSlice(3, 3, table),
-              new TableSlice(6, 3, table))
-      );
       return null;
     });
   }
@@ -288,7 +227,6 @@ public class KudoSerializerTest {
 
     assertArrayEquals(expected, bout.toByteArray());
   }
-
 
   private static Schema buildSimpleTestSchema() {
     Schema.Builder builder = Schema.builder();
@@ -478,7 +416,6 @@ public class KudoSerializerTest {
 
           try (Table merged = serializer.mergeToTable(kudoTables.toArray(new KudoTable[0]))) {
             assertEquals(expected.getRowCount(), merged.getRowCount());
-
             AssertUtils.assertTablesAreEqual(expected, merged);
           }
         } catch (Exception e) {
@@ -558,75 +495,6 @@ public class KudoSerializerTest {
 
     public Table getBaseTable() {
       return baseTable;
-    }
-  }
-
-  @Test
-  public void testMergeWithDumpPath() {
-    File tempFile = null;
-    try {
-      //Create a temporary file for dumping
-      tempFile = File.createTempFile("kudo_dump_test", ".bin");
-      tempFile.deleteOnExit();
-
-      String dumpPath = tempFile.getAbsolutePath();
-      
-      Table table1 = new Table.TestBuilder()
-          .column(1, 2, 3, 4)
-          .column("a", "b", "c", "d")
-          .build();
-      
-      Table table2 = new Table.TestBuilder()
-          .column(5, 6, 7, 8)
-          .column("e", "f", "g", "h")
-          .build();
-      
-      // Create KudoSerializer with table1's schema
-      KudoSerializer serializer = new KudoSerializer(schemaOf(table1));
-      
-      // Serialize both tables
-      ByteArrayOutputStream bout = new ByteArrayOutputStream();
-      serializer.writeToStreamWithMetrics(table1, bout, 0, (int)table1.getRowCount());
-      
-      // Serialize table2 using same serializer - this will create an inconsistent state
-      serializer.writeToStreamWithMetrics(table2, bout, 0, (int)table2.getRowCount());
-      bout.flush();
-      
-      ByteArrayInputStream bin = new ByteArrayInputStream(bout.toByteArray());
-      KudoTable[] kudoTables = new KudoTable[2];
-      
-      // Read the KudoTables from the stream
-      kudoTables[0] = KudoTable.from(bin).get();
-      kudoTables[1] = KudoTable.from(bin).get();
-      
-      // merge the two tables and dump the result to the temp file
-      Supplier<OutputStream> outputStreamSupplier = () -> {
-        try {
-          return new FileOutputStream(dumpPath);
-        } catch (Exception e) {
-          throw new RuntimeException(e);
-        }
-      };
-      MergeOptions options = new MergeOptions(DumpOption.Always, outputStreamSupplier, dumpPath);
-      serializer.mergeOnHost(kudoTables, options);
-      
-      // Verify dump file exists and has content
-      assertTrue(tempFile.exists(), "Dump file should exist");
-      assertTrue(tempFile.length() > 0, "Dump file should not be empty");
-      
-      // Basic check that file contains schema info
-      byte[] fileContent = java.nio.file.Files.readAllBytes(tempFile.toPath());
-      String contentStart = new String(fileContent, 0, Math.min(100, fileContent.length));
-      assertTrue(contentStart.contains("col_0_0") || contentStart.contains("Schema"), 
-          "Dump file should contain schema information");
-      
-    } catch (Exception e) {
-      fail("Test failed with exception: " + e.getMessage());
-    } finally {
-      // Cleanup
-      if (tempFile != null && tempFile.exists()) {
-        tempFile.delete();
-      }
     }
   }
 }

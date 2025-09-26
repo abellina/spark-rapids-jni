@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2025, NVIDIA CORPORATION.
+ * Copyright (c) 2024, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import ai.rapids.cudf.*;
 import com.nvidia.spark.rapids.jni.Arms;
 import com.nvidia.spark.rapids.jni.schema.SchemaVisitor;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 import static com.nvidia.spark.rapids.jni.Preconditions.ensure;
@@ -30,29 +30,27 @@ import static java.util.Objects.requireNonNull;
  * This class is used to build a cudf table from a list of column view info, and a device buffer.
  */
 class TableBuilder implements SchemaVisitor<ColumnView, ColumnViewInfo, Table>, AutoCloseable {
-  private int curViewInfoIdx;
-  private int curViewIdx;
+  private int curColumnIdx;
   private final DeviceMemoryBuffer buffer;
-  private final ColumnViewInfo[] colViewInfoList;
-  private final ColumnView[] columnViewList;
+  private final List<ColumnViewInfo> colViewInfoList;
+  private final List<ColumnView> columnViewList;
 
-  public TableBuilder(ColumnViewInfo[] colViewInfoList, DeviceMemoryBuffer buffer) {
+  public TableBuilder(List<ColumnViewInfo> colViewInfoList, DeviceMemoryBuffer buffer) {
     requireNonNull(colViewInfoList, "colViewInfoList cannot be null");
-    ensure(colViewInfoList.length != 0, "colViewInfoList cannot be empty");
+    ensure(!colViewInfoList.isEmpty(), "colViewInfoList cannot be empty");
     requireNonNull(buffer, "Device buffer can't be null!");
 
-    this.curViewInfoIdx = 0;
-    this.curViewIdx = 0;
+    this.curColumnIdx = 0;
     this.buffer = buffer;
     this.colViewInfoList = colViewInfoList;
-    this.columnViewList = new ColumnView[colViewInfoList.length];
+    this.columnViewList = new ArrayList<>(colViewInfoList.size());
   }
 
   @Override
   public Table visitTopSchema(Schema schema, List<ColumnView> children) {
     // When this method is called, the ownership of the column views in `columnViewList` has been transferred to
     // `children`, so we need to clear `columnViewList`.
-    Arrays.fill(columnViewList, null);
+    this.columnViewList.clear();
     try {
       try (CloseableArray<ColumnVector> arr = CloseableArray.wrap(new ColumnVector[children.size()])) {
         for (int i = 0; i < children.size(); i++) {
@@ -73,9 +71,8 @@ class TableBuilder implements SchemaVisitor<ColumnView, ColumnViewInfo, Table>, 
 
     ColumnView[] childrenView = children.toArray(new ColumnView[0]);
     ColumnView columnView = colViewInfo.buildColumnView(buffer, childrenView);
-    columnViewList[curViewIdx] = columnView;
-    curViewIdx += 1;
-    curViewInfoIdx += 1;
+    curColumnIdx += 1;
+    columnViewList.add(columnView);
     return columnView;
   }
 
@@ -83,7 +80,7 @@ class TableBuilder implements SchemaVisitor<ColumnView, ColumnViewInfo, Table>, 
   public ColumnViewInfo preVisitList(Schema listType) {
     ColumnViewInfo colViewInfo = getCurrentColumnViewInfo();
 
-    curViewInfoIdx += 1;
+    curColumnIdx += 1;
     return colViewInfo;
   }
 
@@ -93,8 +90,7 @@ class TableBuilder implements SchemaVisitor<ColumnView, ColumnViewInfo, Table>, 
     ColumnView[] children = new ColumnView[]{childResult};
 
     ColumnView view = colViewInfo.buildColumnView(buffer, children);
-    columnViewList[curViewIdx] = view;
-    curViewIdx += 1;
+    columnViewList.add(view);
     return view;
   }
 
@@ -103,14 +99,13 @@ class TableBuilder implements SchemaVisitor<ColumnView, ColumnViewInfo, Table>, 
     ColumnViewInfo colViewInfo = getCurrentColumnViewInfo();
 
     ColumnView columnView = colViewInfo.buildColumnView(buffer, null);
-    columnViewList[curViewIdx] = columnView;
-    curViewIdx += 1;
-    curViewInfoIdx += 1;
+    curColumnIdx += 1;
+    columnViewList.add(columnView);
     return columnView;
   }
 
   private ColumnViewInfo getCurrentColumnViewInfo() {
-    return colViewInfoList[curViewInfoIdx];
+    return colViewInfoList.get(curColumnIdx);
   }
 
   @Override
