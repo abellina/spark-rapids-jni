@@ -325,7 +325,6 @@ public class KudoSerializer {
    * See {@link #mergeOnHost(KudoTable[])}.
    * @deprecated Use {@link #mergeOnHost(KudoTable[])} instead.
    */
-  @Deprecated
   public Pair<KudoHostMergeResult, MergeMetrics> mergeOnHost(List<KudoTable> kudoTables) {
     MergeMetrics.Builder metricsBuilder = MergeMetrics.builder();
 
@@ -341,7 +340,6 @@ public class KudoSerializer {
    *
    * @deprecated Use {@link #mergeToTable(KudoTable[])} instead.
    */
-  @Deprecated
   public Pair<Table, MergeMetrics> mergeToTable(List<KudoTable> kudoTables) throws Exception {
     Pair<KudoHostMergeResult, MergeMetrics> result = mergeOnHost(kudoTables);
     MergeMetrics.Builder builder = MergeMetrics.builder(result.getRight());
