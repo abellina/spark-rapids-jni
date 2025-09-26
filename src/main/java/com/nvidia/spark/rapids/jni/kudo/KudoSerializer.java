@@ -44,6 +44,8 @@ import java.util.List;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
+import ai.rapids.cudf.NvtxColor;
+import ai.rapids.cudf.NvtxRange;
 
 /**
  * This class is used to serialize/deserialize a table using the Kudo format.
@@ -333,8 +335,15 @@ public class KudoSerializer {
    * @return the merged table.
    */
   public KudoHostMergeResult mergeOnHost(KudoTable[] kudoTables) {
-    MergedInfoCalc mergedInfoCalc = MergedInfoCalc.calc(schema, kudoTables);
-    return KudoTableMerger.merge(schema, mergedInfoCalc);
+    try (NvtxRange range = new NvtxRange("KudoSerializer.mergeOnHost", NvtxColor.BLUE)) {
+      MergedInfoCalc mergedInfoCalc;
+      try (NvtxRange calcRange = new NvtxRange("MergedInfoCalc.calc", NvtxColor.GREEN)) {
+        mergedInfoCalc = MergedInfoCalc.calc(schema, kudoTables);
+      }
+      try (NvtxRange mergeRange = new NvtxRange("KudoTableMerger.merge", NvtxColor.ORANGE)) {
+        return KudoTableMerger.merge(schema, mergedInfoCalc);
+      }
+    }
   }
 
  /**
@@ -349,16 +358,22 @@ public class KudoSerializer {
    * @return the merged table.
    */
   public KudoHostMergeResult mergeOnHost(KudoTable[] kudoTables, MergeOptions options) throws Exception {
-    if (options.getDumpOption() == DumpOption.Always) {
-      dumpToStream(kudoTables, options.getOutputStreamSupplier(), options.getFilePath());
-    }
-    try {
-      return mergeOnHost(kudoTables);
-    } catch (Exception e) {
-      if (options.getDumpOption() == DumpOption.OnFailure) {
-        dumpToStream(kudoTables, options.getOutputStreamSupplier(), options.getFilePath());
+    try (NvtxRange range = new NvtxRange("KudoSerializer.mergeOnHost.withOptions", NvtxColor.PURPLE)) {
+      if (options.getDumpOption() == DumpOption.Always) {
+        try (NvtxRange dumpRange = new NvtxRange("dumpToStream.always", NvtxColor.YELLOW)) {
+          dumpToStream(kudoTables, options.getOutputStreamSupplier(), options.getFilePath());
+        }
       }
-      throw new RuntimeException(e);
+      try {
+        return mergeOnHost(kudoTables);
+      } catch (Exception e) {
+        if (options.getDumpOption() == DumpOption.OnFailure) {
+          try (NvtxRange dumpRange = new NvtxRange("dumpToStream.onFailure", NvtxColor.RED)) {
+            dumpToStream(kudoTables, options.getOutputStreamSupplier(), options.getFilePath());
+          }
+        }
+        throw new RuntimeException(e);
+      }
     }
   }
 
@@ -392,8 +407,12 @@ public class KudoSerializer {
    * @throws Exception if any error occurs during merge.
    */
   public Table mergeToTable(KudoTable[] kudoTables) throws Exception {
-    try (KudoHostMergeResult children = mergeOnHost(kudoTables)) {
-      return children.toTable();
+    try (NvtxRange range = new NvtxRange("KudoSerializer.mergeToTable", NvtxColor.CYAN)) {
+      try (KudoHostMergeResult children = mergeOnHost(kudoTables)) {
+          try (NvtxRange toTableRange = new NvtxRange("KudoHostMergeResult.toTable", NvtxColor.PURPLE)) {
+          return children.toTable();
+        }
+      }
     }
   }
 

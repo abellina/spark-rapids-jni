@@ -19,6 +19,8 @@ package com.nvidia.spark.rapids.jni.kudo;
 import ai.rapids.cudf.BufferType;
 import ai.rapids.cudf.HostMemoryBuffer;
 import ai.rapids.cudf.Schema;
+import ai.rapids.cudf.NvtxColor;
+import ai.rapids.cudf.NvtxRange;
 import com.nvidia.spark.rapids.jni.Arms;
 import com.nvidia.spark.rapids.jni.schema.SimpleSchemaVisitor;
 import com.nvidia.spark.rapids.jni.schema.Visitors;
@@ -197,35 +199,38 @@ class KudoTableMerger implements SimpleSchemaVisitor {
   }
 
   private int deserializeValidityBuffer(ColumnOffsetInfo curColOffset) {
-    if (curColOffset.getValidity() != INVALID_OFFSET) {
-      int offset = toIntExact(curColOffset.getValidity());
+    try (NvtxRange range = new NvtxRange("KudoTableMerger.deserializeValidityBuffer", NvtxColor.YELLOW)) {
+      if (curColOffset.getValidity() != INVALID_OFFSET) {
+        int offset = toIntExact(curColOffset.getValidity());
 
-      ValidityBufferMerger merger = new ValidityBufferMerger(buffer, offset, inputBuf, outputBuf);
-      for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
-        SliceInfo sliceInfo = sliceInfoOf(tableIdx);
-        long validityOffset = validityOffsets[tableIdx];
-        if (kudoTables[tableIdx].getHeader().hasValidityBuffer(curColIdx)) {
-          merger.copyValidityBuffer(kudoTables[tableIdx].getBuffer(), toIntExact(validityOffset), sliceInfo);
-        } else {
-          merger.appendAllValid(sliceInfo.getRowCount());
+        ValidityBufferMerger merger = new ValidityBufferMerger(buffer, offset, inputBuf, outputBuf);
+        for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
+          SliceInfo sliceInfo = sliceInfoOf(tableIdx);
+          long validityOffset = validityOffsets[tableIdx];
+          if (kudoTables[tableIdx].getHeader().hasValidityBuffer(curColIdx)) {
+            merger.copyValidityBuffer(kudoTables[tableIdx].getBuffer(), toIntExact(validityOffset), sliceInfo);
+          } else {
+            merger.appendAllValid(sliceInfo.getRowCount());
+          }
         }
+        return merger.getTotalNullCount();
+      } else {
+        return 0;
       }
-      return merger.getTotalNullCount();
-    } else {
-      return 0;
     }
   }
 
   private void deserializeOffsetBuffer(ColumnOffsetInfo curColOffset) {
-    Arrays.fill(sliceInfoBuf, EMPTY_SLICE);
+    try (NvtxRange range = new NvtxRange("KudoTableMerger.deserializeOffsetBuffer", NvtxColor.YELLOW)) {
+      Arrays.fill(sliceInfoBuf, EMPTY_SLICE);
 
-    if (curColOffset.getOffset() != INVALID_OFFSET) {
-      long outputOffset = curColOffset.getOffset();
-      HostMemoryBuffer offsetBuf = buffer;
+      if (curColOffset.getOffset() != INVALID_OFFSET) {
+        long outputOffset = curColOffset.getOffset();
+        HostMemoryBuffer offsetBuf = buffer;
 
-      int accumulatedDataLen = 0;
+        int accumulatedDataLen = 0;
 
-      for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
+        for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
         SliceInfo sliceInfo = sliceInfoOf(tableIdx);
         if (sliceInfo.getRowCount() > 0) {
           int rowCnt = sliceInfo.getRowCount();
@@ -287,34 +292,41 @@ class KudoTableMerger implements SimpleSchemaVisitor {
         }
       }
 
-      offsetBuf.setInt(outputOffset, accumulatedDataLen);
+        offsetBuf.setInt(outputOffset, accumulatedDataLen);
+      }
     }
   }
 
   private void deserializeDataBuffer(ColumnOffsetInfo curColOffset, OptionalInt sizeInBytes) {
-    if (curColOffset.getData() != INVALID_OFFSET && curColOffset.getDataBufferLen() > 0) {
-      long offset = curColOffset.getData();
+    try (NvtxRange range = new NvtxRange("KudoTableMerger.deserializeDataBuffer", NvtxColor.CYAN)) {
+      if (curColOffset.getData() != INVALID_OFFSET && curColOffset.getDataBufferLen() > 0) {
+        long offset = curColOffset.getData();
 
-      if (sizeInBytes.isPresent()) {
-        // Fixed size type
-        int elementSize = sizeInBytes.getAsInt();
+        if (sizeInBytes.isPresent()) {
+          // Fixed size type
+          try (NvtxRange fixedRange = new NvtxRange("deserializeDataBuffer.fixedSize", NvtxColor.CYAN)) {
+            int elementSize = sizeInBytes.getAsInt();
 
-        long start = offset;
-        for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
-          SliceInfo sliceInfo = sliceInfoOf(tableIdx);
-          if (sliceInfo.getRowCount() > 0) {
-            int thisDataLen = toIntExact(elementSize * sliceInfo.getRowCount());
-            copyDataBuffer(buffer, start, tableIdx, thisDataLen);
-            start += thisDataLen;
+            long start = offset;
+            for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
+              SliceInfo sliceInfo = sliceInfoOf(tableIdx);
+              if (sliceInfo.getRowCount() > 0) {
+                int thisDataLen = toIntExact(elementSize * sliceInfo.getRowCount());
+                copyDataBuffer(buffer, start, tableIdx, thisDataLen);
+                start += thisDataLen;
+              }
+            }
           }
-        }
-      } else {
-        // String type
-        long start = offset;
-        for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
-          int thisDataLen = sliceInfoBuf[tableIdx].getRowCount();
-          copyDataBuffer(buffer, start, tableIdx, thisDataLen);
-          start += thisDataLen;
+        } else {
+          // String type
+          try (NvtxRange stringRange = new NvtxRange("deserializeDataBuffer.stringType", NvtxColor.CYAN)) {
+            long start = offset;
+            for (int tableIdx = 0; tableIdx < kudoTables.length; tableIdx += 1) {
+              int thisDataLen = sliceInfoBuf[tableIdx].getRowCount();
+              copyDataBuffer(buffer, start, tableIdx, thisDataLen);
+              start += thisDataLen;
+            }
+          }
         }
       }
     }
@@ -335,19 +347,27 @@ class KudoTableMerger implements SimpleSchemaVisitor {
   }
 
   private void copyDataBuffer(HostMemoryBuffer dst, long dstOffset, int tableIdx, int dataLen) {
-    long startOffset = dataOffsets[tableIdx];
-    dst.copyFromHostBuffer(dstOffset, kudoTables[tableIdx].getBuffer(), startOffset, dataLen);
+    try (NvtxRange range = new NvtxRange("KudoTableMerger.copyDataBuffer", NvtxColor.PURPLE)) {
+      long startOffset = dataOffsets[tableIdx];
+      dst.copyFromHostBuffer(dstOffset, kudoTables[tableIdx].getBuffer(), startOffset, dataLen);
+    }
   }
 
   static KudoHostMergeResult merge(Schema schema, MergedInfoCalc mergedInfo) {
-    KudoTable[] serializedTables = mergedInfo.getTables();
-    return Arms.closeIfException(HostMemoryBuffer.allocate(mergedInfo.getTotalDataLen(), true),
-        buffer -> {
-          KudoTableMerger merger = new KudoTableMerger(serializedTables, buffer, mergedInfo.getColumnOffsets(),
-                  mergedInfo.getRowCount());
-          Visitors.visitSchema(schema, merger);
-          return merger.result;
-        });
+    try (NvtxRange range = new NvtxRange("KudoTableMerger.merge", NvtxColor.ORANGE)) {
+      KudoTable[] serializedTables = mergedInfo.getTables();
+      return Arms.closeIfException(HostMemoryBuffer.allocate(mergedInfo.getTotalDataLen(), true),
+          buffer -> {
+            try (NvtxRange mergerRange = new NvtxRange("KudoTableMerger.create", NvtxColor.BLUE)) {
+              KudoTableMerger merger = new KudoTableMerger(serializedTables, buffer, mergedInfo.getColumnOffsets(),
+                      mergedInfo.getRowCount());
+              try (NvtxRange visitRange = new NvtxRange("KudoTableMerger.visitSchema", NvtxColor.BLUE)) {
+                Visitors.visitSchema(schema, merger);
+              }
+              return merger.result;
+            }
+          });
+    }
   }
 
   /**
@@ -402,32 +422,40 @@ class KudoTableMerger implements SimpleSchemaVisitor {
      */
     int copyValidityBuffer(HostMemoryBuffer src, int srcOffset,
                             SliceInfo sliceInfo) {
-      if (sliceInfo.getRowCount() <= 0) {
-        return 0;
+      try (NvtxRange range = new NvtxRange("ValidityBufferMerger.copyValidityBuffer", NvtxColor.YELLOW)) {
+        if (sliceInfo.getRowCount() <= 0) {
+          return 0;
+        }
+
+        int curDestBitIdx = totalRowCount % 32;
+        int curSrcBitIdx = sliceInfo.getValidityBufferInfo().getBeginBit();
+        int nullCount;
+
+        if (curSrcBitIdx < curDestBitIdx) {
+          // First case of this algorithm, in which we always need to merge remained bits of previous
+          // integer when copying it to destination buffer.
+          try (NvtxRange caseRange = new NvtxRange("copyValidityBuffer.caseOne", NvtxColor.YELLOW)) {
+            nullCount = copySourceCaseOne(src, srcOffset, sliceInfo);
+          }
+        } else if (curSrcBitIdx > curDestBitIdx) {
+          // Second case of this algorithm, in which we always need to borrow bits from next integer
+          // when copying it to destination buffer.
+          try (NvtxRange caseRange = new NvtxRange("copyValidityBuffer.caseTwo", NvtxColor.YELLOW)) {
+            nullCount = copySourceCaseTwo(src, srcOffset, sliceInfo);
+          }
+        } else {
+          // Third case of this algorithm, in which we can directly copy source buffer to destination
+          // buffer, except some special handling of first integer.
+          try (NvtxRange caseRange = new NvtxRange("copyValidityBuffer.caseThree", NvtxColor.YELLOW)) {
+            nullCount = copySourceCaseThree(src, srcOffset, sliceInfo);
+          }
+        }
+
+        totalRowCount += sliceInfo.getRowCount();
+        totalNullCount += nullCount;
+
+        return nullCount;
       }
-
-      int curDestBitIdx = totalRowCount % 32;
-      int curSrcBitIdx = sliceInfo.getValidityBufferInfo().getBeginBit();
-      int nullCount;
-
-      if (curSrcBitIdx < curDestBitIdx) {
-        // First case of this algorithm, in which we always need to merge remained bits of previous
-        // integer when copying it to destination buffer.
-        nullCount = copySourceCaseOne(src, srcOffset, sliceInfo);
-      } else if (curSrcBitIdx > curDestBitIdx) {
-        // Second case of this algorithm, in which we always need to borrow bits from next integer
-        // when copying it to destination buffer.
-        nullCount = copySourceCaseTwo(src, srcOffset, sliceInfo);
-      } else {
-        // Third case of this algorithm, in which we can directly copy source buffer to destination
-        // buffer, except some special handling of first integer.
-        nullCount = copySourceCaseThree(src, srcOffset, sliceInfo);
-      }
-
-      totalRowCount += sliceInfo.getRowCount();
-      totalNullCount += nullCount;
-
-      return nullCount;
     }
 
     /**
@@ -435,33 +463,35 @@ class KudoTableMerger implements SimpleSchemaVisitor {
      * @param numRows Number of rows to append.
      */
     void appendAllValid(int numRows) {
-      if (numRows <= 0) {
-        return;
-      }
-      int curDestIntIdx = destOffset + (totalRowCount / 32) * 4;
-      int curDestBitIdx = totalRowCount % 32;
-
-      // First output
-      int firstOutput = dest.getInt(curDestIntIdx);
-      firstOutput |= -(1 << curDestBitIdx);
-      dest.setInt(curDestIntIdx, firstOutput);
-
-      int leftRowCount = max(0, numRows - (32 - curDestBitIdx));
-
-      curDestIntIdx += 4;
-      while (leftRowCount > 0) {
-        int curArrLen = min(leftRowCount / 32, ONES.length);
-        if (curArrLen == 0) {
-          dest.setInt(curDestIntIdx, 0xFFFFFFFF);
-          leftRowCount = 0;
-        } else {
-          dest.setInts(curDestIntIdx, ONES, 0, curArrLen);
-          leftRowCount = max(0, leftRowCount - 32 * curArrLen);
-          curDestIntIdx += curArrLen * 4;
+      try (NvtxRange range = new NvtxRange("ValidityBufferMerger.appendAllValid", NvtxColor.YELLOW)) {
+        if (numRows <= 0) {
+          return;
         }
-      }
+        int curDestIntIdx = destOffset + (totalRowCount / 32) * 4;
+        int curDestBitIdx = totalRowCount % 32;
 
-      totalRowCount += numRows;
+        // First output
+        int firstOutput = dest.getInt(curDestIntIdx);
+        firstOutput |= -(1 << curDestBitIdx);
+        dest.setInt(curDestIntIdx, firstOutput);
+
+        int leftRowCount = max(0, numRows - (32 - curDestBitIdx));
+
+        curDestIntIdx += 4;
+        while (leftRowCount > 0) {
+          int curArrLen = min(leftRowCount / 32, ONES.length);
+          if (curArrLen == 0) {
+            dest.setInt(curDestIntIdx, 0xFFFFFFFF);
+            leftRowCount = 0;
+          } else {
+            dest.setInts(curDestIntIdx, ONES, 0, curArrLen);
+            leftRowCount = max(0, leftRowCount - 32 * curArrLen);
+            curDestIntIdx += curArrLen * 4;
+          }
+        }
+
+        totalRowCount += numRows;
+      }
     }
 
     private int copySourceCaseOne(HostMemoryBuffer src, int srcOffset,

@@ -18,6 +18,8 @@ package com.nvidia.spark.rapids.jni.kudo;
 
 import ai.rapids.cudf.BufferType;
 import ai.rapids.cudf.Schema;
+import ai.rapids.cudf.NvtxColor;
+import ai.rapids.cudf.NvtxRange;
 import com.nvidia.spark.rapids.jni.schema.SimpleSchemaVisitor;
 import com.nvidia.spark.rapids.jni.schema.Visitors;
 
@@ -57,8 +59,12 @@ class MergedInfoCalc implements SimpleSchemaVisitor {
     }
 
     private void doCalc(Schema schema) {
-        for (KudoTable kudoTable : kudoTables) {
-            Visitors.visitSchema(schema, new SingleTableVisitor(kudoTable));
+        try (NvtxRange range = new NvtxRange("MergedInfoCalc.doCalc", NvtxColor.GREEN)) {
+            for (int i = 0; i < kudoTables.length; i++) {
+                try (NvtxRange tableRange = new NvtxRange("MergedInfoCalc.processTable." + i, NvtxColor.GREEN)) {
+                    Visitors.visitSchema(schema, new SingleTableVisitor(kudoTables[i]));
+                }
+            }
         }
     }
 
@@ -90,10 +96,16 @@ class MergedInfoCalc implements SimpleSchemaVisitor {
     }
 
     static MergedInfoCalc calc(Schema schema, KudoTable[] tables) {
-        MergedInfoCalc calc = new MergedInfoCalc(tables);
-        calc.doCalc(schema);
-        Visitors.visitSchema(schema, calc);
-        return calc;
+        try (NvtxRange range = new NvtxRange("MergedInfoCalc.calc", NvtxColor.DARK_GREEN)) {
+            MergedInfoCalc calc = new MergedInfoCalc(tables);
+            try (NvtxRange doCalcRange = new NvtxRange("MergedInfoCalc.doCalc.phase", NvtxColor.GREEN)) {
+                calc.doCalc(schema);
+            }
+            try (NvtxRange visitRange = new NvtxRange("MergedInfoCalc.visitSchema.phase", NvtxColor.GREEN)) {
+                Visitors.visitSchema(schema, calc);
+            }
+            return calc;
+        }
     }
 
     private void initHasNull() {
