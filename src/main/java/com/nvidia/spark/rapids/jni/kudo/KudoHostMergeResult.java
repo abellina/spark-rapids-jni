@@ -86,7 +86,7 @@ public class KudoHostMergeResult implements AutoCloseable {
    * @return the cudf table
    */
   public static Table toTableStatic(HostMemoryBuffer hostBuf,
-      Schema schema, ColumnViewInfo[] columnInfoList) {
+      Schema schema, List<ColumnViewInfo> columnInfoList) {
     try (DeviceMemoryBuffer deviceMemBuf = DeviceMemoryBuffer.allocate(hostBuf.getLength())) {
       if (hostBuf.getLength() > 0) {
         deviceMemBuf.copyFromHostBufferAsync(hostBuf, Cuda.DEFAULT_STREAM);

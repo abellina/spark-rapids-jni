@@ -322,46 +322,6 @@ public class KudoSerializer {
   }
 
   /**
-   * Merge a list of kudo tables into a table on host memory.
-   * <br/>
-   * The caller should ensure that the {@link KudoSerializer} used to generate kudo tables have same schema as current
-   * {@link KudoSerializer}, otherwise behavior is undefined.
-   *
-   * @param kudoTables array of kudo tables. This method doesn't take ownership of the input tables, and caller should
-   *                   take care of closing them after calling this method.
-   * @return the merged table.
-   */
-  public KudoHostMergeResult mergeOnHost(KudoTable[] kudoTables) {
-    MergedInfoCalc mergedInfoCalc = MergedInfoCalc.calc(schema, kudoTables);
-    return KudoTableMerger.merge(schema, mergedInfoCalc);
-  }
-
- /**
-   * Merge a list of kudo tables into a table on host memory.
-   * <br/>
-   * The caller should ensure that the {@link KudoSerializer} used to generate kudo tables have same schema as current
-   * {@link KudoSerializer}, otherwise behavior is undefined.
-   *
-   * @param kudoTables array of kudo tables. This method doesn't take ownership of the input tables, and caller should
-   *                   take care of closing them after calling this method.
-   * @param options merge options, including dump option and output stream. The output stream will be closed after the merge.
-   * @return the merged table.
-   */
-  public KudoHostMergeResult mergeOnHost(KudoTable[] kudoTables, MergeOptions options) throws Exception {
-    if (options.getDumpOption() == DumpOption.Always) {
-      dumpToStream(kudoTables, options.getOutputStreamSupplier(), options.getFilePath());
-    }
-    try {
-      return mergeOnHost(kudoTables);
-    } catch (Exception e) {
-      if (options.getDumpOption() == DumpOption.OnFailure) {
-        dumpToStream(kudoTables, options.getOutputStreamSupplier(), options.getFilePath());
-      }
-      throw new RuntimeException(e);
-    }
-  }
-
-  /**
    * See {@link #mergeOnHost(KudoTable[])}.
    * @deprecated Use {@link #mergeOnHost(KudoTable[])} instead.
    */
@@ -375,24 +335,6 @@ public class KudoSerializer {
         metricsBuilder::mergeIntoHostBufferTime);
     return Pair.of(result, metricsBuilder.build());
   }
-
-  /**
-   * Merge an array of kudo tables into a contiguous table.
-   * <br/>
-   * The caller should ensure that the {@link KudoSerializer} used to generate kudo tables have same schema as current
-   * {@link KudoSerializer}, otherwise behavior is undefined.
-   *
-   * @param kudoTables array of kudo tables. This method doesn't take ownership of the input tables, and caller should
-   *                   take care of closing them after calling this method.
-   * @return the merged table.
-   * @throws Exception if any error occurs during merge.
-   */
-  public Table mergeToTable(KudoTable[] kudoTables) throws Exception {
-    try (KudoHostMergeResult children = mergeOnHost(kudoTables)) {
-      return children.toTable();
-    }
-  }
-
 
   /**
    * See {@link #mergeToTable(KudoTable[])}.

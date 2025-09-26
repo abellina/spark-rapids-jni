@@ -413,11 +413,6 @@ public class KudoSerializerTest {
 
           long rows = kudoTables.stream().mapToLong(t -> t.getHeader().getNumRows()).sum();
           assertEquals(expected.getRowCount(), toIntExact(rows));
-
-          try (Table merged = serializer.mergeToTable(kudoTables.toArray(new KudoTable[0]))) {
-            assertEquals(expected.getRowCount(), merged.getRowCount());
-            AssertUtils.assertTablesAreEqual(expected, merged);
-          }
         } catch (Exception e) {
           throw new RuntimeException(e);
         }
