@@ -27,22 +27,27 @@ import java.util.HashSet;
  * state from a java perspective.
  */
 class ThreadStateRegistry {
-  private static final Logger LOG = LoggerFactory.getLogger(ThreadStateRegistry.class);
-
   private static final HashMap<Long, Thread> knownThreads = new HashMap<>();
 
-  public static synchronized void addThread(long nativeId, Thread t) {
-    knownThreads.put(nativeId, t);
+  public static void addThread(long nativeId, Thread t) {
+    synchronized(knownThreads) {
+      knownThreads.put(nativeId, t);
+    }
   }
 
   // Typically called from JNI
-  public static synchronized void removeThread(long threadId) {
-    knownThreads.remove(threadId);
+  public static void removeThread(long threadId) {
+    synchronized(knownThreads) {
+      knownThreads.remove(threadId);
+    }
   }
 
   // This is likely called from JNI
-  public static synchronized boolean isThreadBlocked(long nativeId) {
-    Thread t = knownThreads.get(nativeId);
+  public static boolean isThreadBlocked(long nativeId) {
+    Thread t;
+    synchronized(knownThreads) {
+      t = knownThreads.get(nativeId);
+    }
     if (t == null || !t.isAlive()) {
       // Dead is as good as blocked. This is mostly for tests, not so much for
       // production
