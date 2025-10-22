@@ -199,6 +199,7 @@ class thread_priority {
  * because the mapping between tasks and threads can be complicated and can span
  * different time ranges too.
  */
+ /*
 struct task_metrics {
   // metric for being able to report how many times each type of exception was thrown,
   // and some timings
@@ -234,6 +235,7 @@ struct task_metrics {
     time_lost_nanos             = 0;
   }
 };
+*/
 
 enum class oom_type {
   CPU_OR_GPU = 0,
@@ -315,7 +317,7 @@ class full_thread_state {
   std::chrono::time_point<std::chrono::steady_clock> block_start;
 
   // metrics for the current thread
-  task_metrics metrics;
+  //task_metrics metrics;
 
   std::unique_ptr<std::condition_variable> wake_condition =
     std::make_unique<std::condition_variable>();
@@ -342,10 +344,7 @@ class full_thread_state {
 
   void after_block()
   {
-    auto const end  = std::chrono::steady_clock::now();
-    auto const diff = end - block_start;
-    metrics.time_blocked_nanos +=
-      std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
+    auto const end    = std::chrono::steady_clock::now();
     if (is_in_retry) { retry_start_or_block_end = end; }
   }
 
@@ -353,7 +352,6 @@ class full_thread_state {
   {
     if (is_in_retry) {
       record_and_reset_pending_retry_time();
-      metrics.time_lost_nanos += time_retry_running_nanos;
       time_retry_running_nanos = 0;
     }
   }
@@ -771,6 +769,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // But the life time of threads and tasks are not directly tied together
   // so they are check-pointed periodically. This reads and resets
   // the metric for both the threads and the tasks
+  /*
   template <class T>
   T get_and_reset_metric(long const task_id, T task_metrics::*MetricPtr)
   {
@@ -794,13 +793,15 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     }
     return ret;
   }
+  */
 
   /**
    * get the number of times a retry was thrown and reset the value to 0.
    */
   int get_and_reset_num_retry(long const task_id)
   {
-    return get_and_reset_metric(task_id, &task_metrics::num_times_retry_throw);
+    return 0; //
+    // return get_and_reset_metric(task_id, &task_metrics::num_times_retry_throw);
   }
 
   /**
@@ -808,7 +809,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   int get_and_reset_num_split_retry(long const task_id)
   {
-    return get_and_reset_metric(task_id, &task_metrics::num_times_split_retry_throw);
+    return 0;
+    //return get_and_reset_metric(task_id, &task_metrics::num_times_split_retry_throw);
   }
 
   /**
@@ -816,7 +818,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   long get_and_reset_block_time(long const task_id)
   {
-    return get_and_reset_metric(task_id, &task_metrics::time_blocked_nanos);
+    return 0;
+    //return get_and_reset_metric(task_id, &task_metrics::time_blocked_nanos);
   }
 
   /**
@@ -824,12 +827,14 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   long get_and_reset_lost_time(long const task_id)
   {
-    return get_and_reset_metric(task_id, &task_metrics::time_lost_nanos);
+    return 0;
+    //return get_and_reset_metric(task_id, &task_metrics::time_lost_nanos);
   }
 
   long get_and_reset_gpu_max_memory_allocated(long const task_id)
   {
-    return get_and_reset_metric(task_id, &task_metrics::gpu_max_memory_allocated);
+    return 0L; //
+    // return get_and_reset_metric(task_id, &task_metrics::gpu_max_memory_allocated);
   }
 
   void check_and_break_deadlocks()
@@ -920,7 +925,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // multiple tasks at the same time. So whenever a thread changes status
   // the metrics for the tasks it is working on are aggregated here. When a task
   // finishes the metrics for that task are then deleted.
-  std::map<long, task_metrics> task_to_metrics;
+  //std::map<long, task_metrics> task_to_metrics;
   bool shutting_down = false;
   JavaVM* jvm;
 
@@ -995,6 +1000,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   void checkpoint_metrics(full_thread_state& state)
   {
+    /*
     if (state.task_id < 0) {
       // save the metrics for all tasks before we add any new ones.
       for (auto const task_id : state.pool_task_ids) {
@@ -1006,6 +1012,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       auto const metrics_at = task_to_metrics.try_emplace(state.task_id, task_metrics());
       metrics_at.first->second.take_from(state.metrics);
     }
+    */
   }
 
   /**
@@ -1029,7 +1036,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
                        full_thread_state& state,
                        std::unique_lock<std::mutex> const& lock)
   {
-    state.metrics.num_times_retry_throw++;
+    //state.metrics.num_times_retry_throw++;
     check_before_oom(state, lock);
     state.record_failed_retry_time();
     if (state.is_cpu_alloc) {
@@ -1043,7 +1050,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
                                  full_thread_state& state,
                                  std::unique_lock<std::mutex> const& lock)
   {
-    state.metrics.num_times_split_retry_throw++;
+    //state.metrics.num_times_split_retry_throw++;
     check_before_oom(state, lock);
     state.record_failed_retry_time();
     if (state.is_cpu_alloc) {
@@ -1300,7 +1307,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           thread->second.retry_oom.skip_count--;
         } else if (thread->second.retry_oom.hit_count > 0) {
           thread->second.retry_oom.hit_count--;
-          thread->second.metrics.num_times_retry_throw++;
+          //thread->second.metrics.num_times_retry_throw++;
           std::string const op_prefix = "INJECTED_RETRY_OOM_";
           std::string const op        = op_prefix + (is_for_cpu ? "CPU" : "GPU");
           log_status(op, thread_id, thread->second.task_id, thread->second.state);
@@ -1323,7 +1330,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           thread->second.split_and_retry_oom.skip_count--;
         } else if (thread->second.split_and_retry_oom.hit_count > 0) {
           thread->second.split_and_retry_oom.hit_count--;
-          thread->second.metrics.num_times_split_retry_throw++;
+          //thread->second.metrics.num_times_split_retry_throw++;
           std::string const op_prefix = "INJECTED_SPLIT_AND_RETRY_OOM_";
           std::string const op        = op_prefix + (is_for_cpu ? "CPU" : "GPU");
           log_status(op, thread_id, thread->second.task_id, thread->second.state);
@@ -1406,9 +1413,11 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           // num_bytes is likely not padded, which could cause slight inaccuracies
           // but for now it shouldn't matter for watermark purposes
           if (!is_for_cpu) {
+            /*
             gpu_memory_allocated_bytes += num_bytes;
             thread->second.metrics.gpu_max_memory_allocated =
               std::max(thread->second.metrics.gpu_max_memory_allocated, gpu_memory_allocated_bytes);
+            */  
           }
           break;
         default: break;
@@ -1847,7 +1856,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     auto const thread = threads.find(tid);
     if (thread != threads.end()) {
       log_status("DEALLOC", tid, thread->second.task_id, thread->second.state);
-      if (!is_for_cpu) { gpu_memory_allocated_bytes -= num_bytes; }
+      //if (!is_for_cpu) { gpu_memory_allocated_bytes -= num_bytes; }
     } else {
       log_status("DEALLOC", tid, -2, thread_state::UNKNOWN);
     }
