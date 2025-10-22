@@ -1430,7 +1430,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           break;
         default: break;
       }
-      wake_next_highest_priority_blocked(lock, false, is_for_cpu);
+      //TODO: don't wake up on success? wake_next_highest_priority_blocked(lock, false, is_for_cpu);
     }
   }
 
@@ -1869,29 +1869,29 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       log_status("DEALLOC", tid, -2, thread_state::UNKNOWN);
     }
 
-    for (auto& [thread_id, t_state] : threads) {
-      // Only update state for _other_ threads. We update only other threads, for the case
-      // where we are handling a free from the recursive case: when an allocation/free
-      // happened while handling an allocation failure in onAllocFailed.
-      //
-      // If we moved all threads to *_ALLOC_FREE, after we exit the recursive state and
-      // are back handling the original allocation failure, we are left with a thread
-      // in a state that won't be retried in `post_alloc_failed`.
-      //
-      // By not changing our thread's state to THREAD_ALLOC_FREE, we keep the state
-      // the same, but we still let other threads know that there was a free and they should
-      // handle accordingly.
-      if (t_state->thread_id != tid) {
-        switch (t_state->state) {
-          case thread_state::THREAD_ALLOC:
-            if (is_for_cpu == t_state->is_cpu_alloc) {
-              transition(t_state, thread_state::THREAD_ALLOC_FREE);
-            }
-            break;
-          default: break;
-        }
-      }
-    }
+    //for (auto& [thread_id, t_state] : threads) {
+    //  // Only update state for _other_ threads. We update only other threads, for the case
+    //  // where we are handling a free from the recursive case: when an allocation/free
+    //  // happened while handling an allocation failure in onAllocFailed.
+    //  //
+    //  // If we moved all threads to *_ALLOC_FREE, after we exit the recursive state and
+    //  // are back handling the original allocation failure, we are left with a thread
+    //  // in a state that won't be retried in `post_alloc_failed`.
+    //  //
+    //  // By not changing our thread's state to THREAD_ALLOC_FREE, we keep the state
+    //  // the same, but we still let other threads know that there was a free and they should
+    //  // handle accordingly.
+    //  if (t_state->thread_id != tid) {
+    //    switch (t_state->state) {
+    //      case thread_state::THREAD_ALLOC:
+    //        if (is_for_cpu == t_state->is_cpu_alloc) {
+    //          transition(t_state, thread_state::THREAD_ALLOC_FREE);
+    //        }
+    //        break;
+    //      default: break;
+    //    }
+    //  }
+    //}
     wake_next_highest_priority_blocked(lock, true, is_for_cpu);
   }
 
