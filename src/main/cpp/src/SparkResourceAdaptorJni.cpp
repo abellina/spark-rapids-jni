@@ -726,6 +726,10 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       if (was_inserted.second == false) {
         // task_to_threads already has a task_id for this, so insert the thread_id
         was_inserted.first->second.insert(thread_id);
+      } else {
+        // New task, add to all_task_ids
+        all_task_ids.insert(task_id);
+        LOG_STATUS_CONTAINER("ADD_TASK", task_id, -1, thread_state::UNKNOWN, "CURRENT IDs", all_task_ids);
       }
     } catch (std::exception const&) {
       if (was_threads_inserted.second == true) {
@@ -893,6 +897,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
 
     if (run_checks) { wake_up_threads_after_task_finishes(lock); }
     task_to_threads.erase(task_id);
+    all_task_ids.erase(task_id);
   }
 
   /**
@@ -1224,6 +1229,10 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // Map of BUFN (Blocked Until Further Notice) threads ordered by priority (highest priority first)
   // Key: thread_priority, Value: shared_ptr to the thread state
   std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> bufn_threads;
+  
+  // Set of all active task IDs (tasks that have at least one thread associated with them)
+  // This is maintained incrementally as threads are associated/disassociated with tasks
+  std::unordered_set<long> all_task_ids;
 
   // Metrics are a little complicated. Spark reports metrics at a task level
   // but we track and collect them at a thread level. The life time of a thread
@@ -1522,7 +1531,15 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
         }
         if (remove_task_id >= 0) {
           auto const task_at = task_to_threads.find(remove_task_id);
-          if (task_at != task_to_threads.end()) { task_at->second.erase(thread_id); }
+          if (task_at != task_to_threads.end()) { 
+            task_at->second.erase(thread_id);
+            // If this was the last thread for this task, remove the task
+            if (task_at->second.empty()) {
+              task_to_threads.erase(task_at);
+              all_task_ids.erase(remove_task_id);
+              LOG_STATUS_CONTAINER("REMOVE_TASK", remove_task_id, -1, thread_state::UNKNOWN, "CURRENT IDs", all_task_ids);
+            }
+          }
         }
 
         switch (threads_at->second->state) {
@@ -1773,9 +1790,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       std::map<long, long> pool_bufn_task_thread_count;
       std::map<long, long> pool_task_thread_count;
       std::unordered_set<long> bufn_task_ids;
-      std::unordered_set<long> all_task_ids;
       is_in_deadlock(
-        pool_bufn_task_thread_count, pool_task_thread_count, bufn_task_ids, all_task_ids, lock);
+        pool_bufn_task_thread_count, pool_task_thread_count, bufn_task_ids, lock);
       bool const all_bufn = all_task_ids.size() == bufn_task_ids.size();
       if (all_bufn) {
         // Find the highest priority BUFN thread for the matching CPU/GPU allocation
@@ -1862,7 +1878,6 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   bool is_in_deadlock(std::map<long, long>& pool_bufn_task_thread_count,
                       std::map<long, long>& pool_task_thread_count,
                       std::unordered_set<long>& bufn_task_ids,
-                      std::unordered_set<long>& all_task_ids,
                       std::unique_lock<std::mutex> const& lock)
   {
     JNIEnv* env = nullptr;
@@ -1902,7 +1917,6 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     for (auto const& [thread_id, t_state] : threads) {
       long const task_id = t_state->task_id;
       if (task_id >= 0) {
-        all_task_ids.insert(task_id);
         bool const is_bufn_plus = is_thread_bufn_or_above(env, t_state);
         if (is_bufn_plus) { bufn_task_ids.insert(task_id); }
         if (is_bufn_plus || t_state->state == thread_state::THREAD_BLOCKED) {
@@ -1990,9 +2004,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     std::map<long, long> pool_bufn_task_thread_count;
     std::map<long, long> pool_task_thread_count;
     std::unordered_set<long> bufn_task_ids;
-    std::unordered_set<long> all_task_ids;
     bool const need_to_break_deadlock = is_in_deadlock(
-      pool_bufn_task_thread_count, pool_task_thread_count, bufn_task_ids, all_task_ids, lock);
+      pool_bufn_task_thread_count, pool_task_thread_count, bufn_task_ids, lock);
     if (need_to_break_deadlock) {
       // Find the task thread with the lowest priority that is not already BUFN
       thread_priority to_bufn(-1, -1);
