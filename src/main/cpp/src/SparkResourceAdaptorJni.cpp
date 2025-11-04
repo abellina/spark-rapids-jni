@@ -1713,34 +1713,27 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
                                           bool const is_for_cpu)
   {
     // 1. Find the highest priority blocked thread, for the alloc that matches
-    thread_priority to_wake(-1, -1);
-    bool is_to_wake_set = false;
-    for (auto const& [thread_d, t_state] : threads) {
-      thread_state const& state = t_state->state;
-      if (state == thread_state::THREAD_BLOCKED && is_for_cpu == t_state->is_cpu_alloc) {
-        thread_priority current = t_state->priority();
-        if (!is_to_wake_set || to_wake < current) {
-          to_wake        = current;
-          is_to_wake_set = true;
-        }
+    // Since blocked_threads is ordered by priority (highest first), we just need to find
+    // the first entry that matches the CPU/GPU criteria
+    std::shared_ptr<full_thread_state> thread_to_wake = nullptr;
+    for (auto const& [priority, t_state] : blocked_threads) {
+      if (is_for_cpu == t_state->is_cpu_alloc) {
+        thread_to_wake = t_state;
+        break;  // Found the highest priority match, no need to continue
       }
     }
     // 2. wake up that thread
-    long const thread_id_to_wake = to_wake.get_thread_id();
-    if (thread_id_to_wake > 0) {
-      auto const thread = threads.find(thread_id_to_wake);
-      if (thread != threads.end()) {
-        switch (thread->second->state) {
-          case thread_state::THREAD_BLOCKED:
-            transition(thread->second, thread_state::THREAD_RUNNING);
-            thread->second->wake_condition->notify_all();
-            break;
-          default: {
-            std::stringstream ss;
-            ss << "internal error expected to only wake up blocked threads " << thread_id_to_wake
-               << " " << as_str(thread->second->state);
-            throw std::runtime_error(ss.str());
-          }
+    if (thread_to_wake != nullptr) {
+      switch (thread_to_wake->state) {
+        case thread_state::THREAD_BLOCKED:
+          transition(thread_to_wake, thread_state::THREAD_RUNNING);
+          thread_to_wake->wake_condition->notify_all();
+          break;
+        default: {
+          std::stringstream ss;
+          ss << "internal error expected to only wake up blocked threads " << thread_to_wake->thread_id
+              << " " << as_str(thread_to_wake->state);
+          throw std::runtime_error(ss.str());
         }
       }
     } else if (is_from_free) {
