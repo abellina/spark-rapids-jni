@@ -1746,21 +1746,17 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           break;
         default: break;
       }
-      wake_next_highest_priority_blocked(lock, false, is_for_cpu);
+      wake_next_highest_priority_blocked(lock, is_for_cpu);
     }
   }
 
   /**
-   * Wake the highest priority blocked (not BUFN) thread so it can make progress,
-   * or the highest priority BUFN thread if all of the tasks are in some form of BUFN
-   * and this was triggered by a free.
+   * Wake the highest priority blocked (not BUFN) thread so it can make progress
    *
    * This is typically called when a free happens, or an alloc succeeds.
-   * @param is_from_free true if a free happen.
    * @param is_for_cpu true if it was a CPU operation (free or alloc)
    */
   void wake_next_highest_priority_blocked(std::unique_lock<std::mutex> const& lock,
-                                          bool const is_from_free,
                                           bool const is_for_cpu)
   {
     // 1. Find the highest priority blocked thread, for the alloc that matches
@@ -1777,63 +1773,6 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     if (thread_to_wake != nullptr) {
       transition(thread_to_wake, thread_state::THREAD_RUNNING);
       thread_to_wake->wake_condition->notify_all();
-    } else if (is_from_free) {
-      // 3. Otherwise look to see if we are in a BUFN deadlock state.
-      //
-      // Memory was freed and if all of the tasks are in a BUFN state,
-      // then we want to wake up the highest priority one so it can make progress
-      // instead of trying to split its input. But we only do this if it
-      // is a different thread that is freeing memory from the one we want to wake up.
-      // This is because if the threads are the same no new memory is being added
-      // to what that task has access to and the task may never throw a retry and split.
-      // Instead it would just keep retrying and freeing the same memory each time.
-      std::map<long, long> pool_bufn_task_thread_count;
-      std::map<long, long> pool_task_thread_count;
-      std::unordered_set<long> bufn_task_ids;
-      is_in_deadlock(
-        pool_bufn_task_thread_count, pool_task_thread_count, bufn_task_ids, lock);
-      bool const all_bufn = all_task_ids.size() == bufn_task_ids.size();
-      if (all_bufn) {
-        // Find the highest priority BUFN thread for the matching CPU/GPU allocation
-        // Since bufn_threads is ordered by priority (highest first), we just need to find
-        // the first entry that matches the CPU/GPU criteria
-        std::shared_ptr<full_thread_state> thread_to_wake = nullptr;
-        for (auto const& [priority, t_state] : bufn_threads) {
-          if (is_for_cpu == t_state->is_cpu_alloc) {
-            thread_to_wake = t_state;
-            break;  // Found the highest priority match, no need to continue
-          }
-        }
-        // 4. Wake up the BUFN thread if we should
-        if (thread_to_wake != nullptr) {
-          // Don't wake up yourself on a free. It is not adding more memory for this thread
-          // to use on a retry and we might need a split instead to break a deadlock
-          auto const this_id = static_cast<long>(pthread_self());
-          if (thread_to_wake->thread_id != this_id) {
-            switch (thread_to_wake->state) {
-              case thread_state::THREAD_BUFN:
-                transition(thread_to_wake, thread_state::THREAD_RUNNING);
-                thread_to_wake->wake_condition->notify_all();
-                break;
-              case thread_state::THREAD_BUFN_WAIT:
-                transition(thread_to_wake, thread_state::THREAD_RUNNING);
-                // no need to notify anyone, we will just retry without blocking...
-                break;
-              case thread_state::THREAD_BUFN_THROW:
-                // This should really never happen, this is a temporary state that is here only
-                // while the lock is held, but just in case we don't want to mess it up, or throw
-                // an exception.
-                break;
-              default: {
-                std::stringstream ss;
-                ss << "internal error expected to only wake up blocked threads "
-                   << thread_to_wake->thread_id << " " << as_str(thread_to_wake->state);
-                throw std::runtime_error(ss.str());
-              }
-            }
-          }
-        }
-      }
     }
   }
 
@@ -2241,7 +2180,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
         }
       }
     }
-    wake_next_highest_priority_blocked(lock, true, is_for_cpu);
+    wake_next_highest_priority_blocked(lock, is_for_cpu);
   }
 
   void do_deallocate(void* p, std::size_t size, rmm::cuda_stream_view stream) noexcept override
