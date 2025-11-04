@@ -1256,6 +1256,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       thread_priority priority = state->priority();
       blocked_threads.insert({priority, state});
     }
+
+    LOG_INFO("blocked_threads size: {}", blocked_threads.size());
     
     LOG_TRANSITION(state->thread_id, state->task_id, original, new_state);
   }
