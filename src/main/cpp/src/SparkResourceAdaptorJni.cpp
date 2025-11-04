@@ -1216,6 +1216,10 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   std::map<long, std::shared_ptr<full_thread_state>> threads;
   std::map<long, std::set<long>> task_to_threads;
   long gpu_memory_allocated_bytes = 0;
+  
+  // Map of blocked threads ordered by priority (highest priority first)
+  // Key: thread_priority, Value: shared_ptr to the thread state
+  std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> blocked_threads;
 
   // Metrics are a little complicated. Spark reports metrics at a task level
   // but we track and collect them at a thread level. The life time of a thread
@@ -1231,11 +1235,28 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    * Transition to a new state. Ideally this is what is called when doing a state transition instead
    * of setting the state directly. This will log the transition and do a little bit of
    * verification.
+   * 
+   * If transitioning from BLOCKED, the thread is removed from the blocked_threads map.
+   * If transitioning to BLOCKED, the thread is added to the blocked_threads map.
    */
   void transition(std::shared_ptr<full_thread_state> state, thread_state const new_state)
   {
     thread_state original = state->state;
+    
+    // If transitioning FROM BLOCKED, remove from blocked_threads map
+    if (original == thread_state::THREAD_BLOCKED) {
+      thread_priority priority = state->priority();
+      blocked_threads.erase(priority);
+    }
+    
     state->transition_to(new_state);
+    
+    // If transitioning TO BLOCKED, add to blocked_threads map
+    if (new_state == thread_state::THREAD_BLOCKED) {
+      thread_priority priority = state->priority();
+      blocked_threads.insert({priority, state});
+    }
+    
     LOG_TRANSITION(state->thread_id, state->task_id, original, new_state);
   }
 
