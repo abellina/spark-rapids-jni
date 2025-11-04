@@ -281,7 +281,7 @@ inline std::string format_if_args(std::format_string<Args...> fmt, Args&&... arg
  do { \
    auto _logger = get_logger_if_enabled_info(); \
    if (_logger) { \
-     _logger->log_info(__VA_ARGS__); \
+     _logger->log_info(format_if_args(__VA_ARGS__)); \
    } \
  } while(0)
 
@@ -292,7 +292,7 @@ inline std::string format_if_args(std::format_string<Args...> fmt, Args&&... arg
  do { \
    auto _logger = get_logger_if_enabled_debug(); \
    if (_logger) { \
-     _logger->log_debug(__VA_ARGS__); \
+     _logger->log_debug(format_if_args(__VA_ARGS__)); \
    } \
  } while(0)
 
@@ -1270,6 +1270,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       thread_priority priority = state->priority();
       blocked_threads.insert({priority, state});
     }
+
+    LOG_INFO("blocked_threads size: {}", blocked_threads.size());
     
     LOG_TRANSITION(state->thread_id, state->task_id, original, new_state);
   }
