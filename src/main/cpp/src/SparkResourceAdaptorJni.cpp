@@ -868,17 +868,16 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
         run_checks = remove_thread_association(thread_id, task_id, lock) || run_checks;
       }
     }
-    std::unordered_set<long> thread_ids;
-    for (auto const& [thread_id, ignored] : threads) {
-      thread_ids.insert(thread_id);
-    }
-    for (auto const& thread_id : thread_ids) {
-      auto const thread = threads.find(thread_id);
-      if (thread != threads.end()) {
-        if (thread->second->pool_task_ids.erase(task_id) != 0) {
-          LOG_STATUS_CONTAINER("REMOVE_TASKS", thread_id, -1, thread->second->state, "CURRENT IDs", thread->second->pool_task_ids);
-          if (thread->second->pool_task_ids.empty()) {
-            run_checks = remove_thread_association(thread_id, task_id, lock) || run_checks;
+    if (pool_threads.size() > 0) {
+      std::unordered_set<std::shared_ptr<full_thread_state>> pool_threads_copy;
+      for (auto const& [ignored, thread_state] : pool_threads) {
+        pool_threads_copy.insert(thread_state);
+      }
+      for (auto const& thread_state : pool_threads_copy) {
+        if (thread_state->pool_task_ids.erase(task_id) != 0) {
+          LOG_STATUS_CONTAINER("REMOVE_TASKS", thread_state->thread_id, -1, thread_state->state, "CURRENT IDs", thread_state->pool_task_ids);
+          if (thread_state->pool_task_ids.empty()) {
+            run_checks = remove_thread_association(thread_state->thread_id, task_id, lock) || run_checks;
           }
         }
       }
