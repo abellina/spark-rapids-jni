@@ -110,7 +110,7 @@ public class SparkResourceAdaptor
    * @param taskId the task ID this thread is associated with.
    */
   public void startDedicatedTaskThread(long threadId, long taskId) {
-    log.info("startDedicatedTaskThread: threadId: {}, task id: {}",
+    log.debug("startDedicatedTaskThread: threadId: {}, task id: {}",
         threadId, taskId
     );
     startDedicatedTaskThread(getHandle(), threadId, taskId);
@@ -144,7 +144,7 @@ public class SparkResourceAdaptor
    */
   public void poolThreadWorkingOnTasks(boolean isForShuffle, long threadId, long[] taskIds) {
     if (taskIds.length > 0) {
-      log.info("poolThreadWorkingOnTasks: threadId: {}, task id: {}",
+      log.debug("poolThreadWorkingOnTasks: threadId: {}, task id: {}",
           threadId, Arrays.toString(taskIds)
       );
       poolThreadWorkingOnTasks(getHandle(), isForShuffle, threadId, taskIds);
