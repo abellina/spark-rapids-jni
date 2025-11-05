@@ -1224,9 +1224,9 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // Key: thread_priority, Value: shared_ptr to the thread state
   std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> blocked_threads;
 
-  // Map of BUFN (Blocked Until Further Notice) threads
-  // Key: thread_id, Value: shared_ptr to the thread state
-  std::unordered_map<long, std::shared_ptr<full_thread_state>> bufn_threads;
+  // Map of BUFN (Blocked Until Further Notice) threads ordered by priority (highest priority first)
+  // Key: thread_priority, Value: shared_ptr to the thread state
+  std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> bufn_threads;
 
   // Map of pool_blocked threads
   // Key: thread_id, Value: shared_ptr to the thread state
@@ -1264,13 +1264,12 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   {
     thread_state original = state->state;
     thread_priority priority = state->priority();
-    long thread_id = state->thread_id;
     
     // Remove from tracking maps when transitioning FROM these states
     if (original == thread_state::THREAD_BLOCKED) {
       blocked_threads.erase(priority);
     } else if (original == thread_state::THREAD_BUFN) {
-      bufn_threads.erase(thread_id);
+      bufn_threads.erase(priority);
     }
     
     state->transition_to(new_state);
@@ -1279,7 +1278,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     if (new_state == thread_state::THREAD_BLOCKED) {
       blocked_threads.insert({priority, state});
     } else if (new_state == thread_state::THREAD_BUFN) {
-      bufn_threads.insert({thread_id, state});
+      bufn_threads.insert({priority, state});
     }
 
     LOG_INFO("blocked_threads size: {}, bufn_threads size: {}", 
@@ -1485,20 +1484,15 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   void wake_up_threads_after_task_finishes(const std::unique_lock<std::mutex>& lock)
   {
-    bool are_any_tasks_just_blocked = false;
-    for (auto& [thread_id, t_state] : threads) {
-      switch (t_state->state) {
-        case thread_state::THREAD_BLOCKED:
-          transition(t_state, thread_state::THREAD_RUNNING);
-          t_state->wake_condition->notify_all();
-          are_any_tasks_just_blocked = true;
-          break;
-        default: break;
-      }
+    bool are_any_tasks_just_blocked = !blocked_threads.empty();
+    for (auto& [unused, t_state]: blocked_threads) {
+      transition(t_state, thread_state::THREAD_RUNNING);
+      t_state->wake_condition->notify_all();
     }
 
     if (!are_any_tasks_just_blocked) {
       // wake up all of the BUFN tasks.
+      // TODO: we don't always track BUFN_THROW and BUFN_WAIT with BUFN.
       for (auto& [thread_id, t_state] : threads) {
         switch (t_state->state) {
           case thread_state::THREAD_BUFN:
@@ -1818,8 +1812,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     std::unordered_map<long, std::shared_ptr<full_thread_state>> bufn_thread_ids;
 
     // Add all threads in BUFN state
-    for (auto const& [thread_id, t_state] : bufn_threads) {
-      bufn_thread_ids.insert({thread_id, t_state});
+    for (auto const& [priority, t_state] : bufn_threads) {
+      bufn_thread_ids.insert({t_state->thread_id, t_state});
     }
     // Add all threads in pool_blocked state
     for (auto const& [thread_id, t_state] : pool_blocked_threads) {
@@ -2060,31 +2054,16 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       }
       
       if (all_bufn) {
-        LOG_STATUS("DETAIL",
-                   -1,
-                   -1,
-                   thread_state::UNKNOWN,
-                   "all_bufn state is reached with all_task_ids size: {}",
-                   all_task_ids.size());
-        thread_priority to_wake(-1, -1);
-        bool is_to_wake_set = false;
-        for (auto const& [thread_id, t_state] : threads) {
-          switch (t_state->state) {
-            case thread_state::THREAD_BUFN: {
-              thread_priority const& current = t_state->priority();
-              if (!is_to_wake_set || to_wake < current) {
-                to_wake        = current;
-                is_to_wake_set = true;
-              }
-            } break;
-            default: break;
-          }
-        }
-        long const thread_id    = to_wake.get_thread_id();
-        auto const found_thread = threads.find(thread_id);
-        if (found_thread != threads.end()) {
-          transition(found_thread->second, thread_state::THREAD_SPLIT_THROW);
-          found_thread->second->wake_condition->notify_all();
+        LOG_STATUS("DETAIL", -1, -1, thread_state::UNKNOWN,
+          "all_bufn state is reached with all_task_ids size: {}", all_task_ids.size());
+        
+        // Get the highest priority BUFN thread (first entry since map is ordered by priority)
+        if (!bufn_threads.empty()) {
+          auto const first_bufn = bufn_threads.begin();
+          std::shared_ptr<full_thread_state> thread_to_wake = first_bufn->second;
+          
+          transition(thread_to_wake, thread_state::THREAD_SPLIT_THROW);
+          thread_to_wake->wake_condition->notify_all();
         }
       }
     }
