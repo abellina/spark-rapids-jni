@@ -1253,6 +1253,10 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // Key: thread_id, Value: shared_ptr to the thread state
   std::unordered_map<long, std::shared_ptr<full_thread_state>> pool_blocked_threads;
 
+  // Set of threads currently in THREAD_ALLOC state
+  // Used to efficiently notify threads when memory is freed
+  std::unordered_set<std::shared_ptr<full_thread_state>> alloc_threads;
+
   // used when we are calling check_and_update_for_bufn without the java_blocked_thread_ids
   std::set<long> java_threads_assumed_running;
   
@@ -1290,6 +1294,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       blocked_threads.erase(priority);
     } else if (original == thread_state::THREAD_BUFN) {
       bufn_threads.erase(priority);
+    } else if (original == thread_state::THREAD_ALLOC) {
+      alloc_threads.erase(state);
     }
     
     state->transition_to(new_state);
@@ -1299,10 +1305,12 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       blocked_threads.insert({priority, state});
     } else if (new_state == thread_state::THREAD_BUFN) {
       bufn_threads.insert({priority, state});
+    } else if (new_state == thread_state::THREAD_ALLOC) {
+      alloc_threads.insert(state);
     }
 
-    LOG_INFO("blocked_threads size: {}, bufn_threads size: {}", 
-             blocked_threads.size(), bufn_threads.size());
+    LOG_INFO("blocked_threads size: {}, bufn_threads size: {}, alloc_threads size: {}", 
+             blocked_threads.size(), bufn_threads.size(), alloc_threads.size());
     
     LOG_TRANSITION(state->thread_id, state->task_id, original, new_state);
   }
@@ -1504,13 +1512,16 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   void wake_up_threads_after_task_finishes(const std::unique_lock<std::mutex>& lock)
   {
-    bool are_any_tasks_just_blocked = !blocked_threads.empty();
-    for (auto& [unused, t_state]: blocked_threads) {
-      transition(t_state, thread_state::THREAD_RUNNING);
-      t_state->wake_condition->notify_all();
-    }
-
-    if (!are_any_tasks_just_blocked) {
+    if (!blocked_threads.empty()) {
+      std::vector<std::shared_ptr<full_thread_state>> threads_to_transition;
+      for (auto& [unused, t_state]: blocked_threads) {
+        threads_to_transition.push_back(t_state);
+      }
+      for (auto t_state : threads_to_transition) {
+        transition(t_state, thread_state::THREAD_RUNNING);
+        t_state->wake_condition->notify_all();
+      }
+    } else {
       // wake up all of the BUFN tasks.
       // TODO: we don't always track BUFN_THROW and BUFN_WAIT with BUFN.
       for (auto& [thread_id, t_state] : threads) {
@@ -2214,27 +2225,26 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       LOG_STATUS("DEALLOC", tid, -2, thread_state::UNKNOWN, "is_for_cpu: {}", is_for_cpu);
     }
 
-    for (auto& [thread_id, t_state] : threads) {
-      // Only update state for _other_ threads. We update only other threads, for the case
-      // where we are handling a free from the recursive case: when an allocation/free
-      // happened while handling an allocation failure in onAllocFailed.
-      //
-      // If we moved all threads to *_ALLOC_FREE, after we exit the recursive state and
-      // are back handling the original allocation failure, we are left with a thread
-      // in a state that won't be retried in `post_alloc_failed`.
-      //
-      // By not changing our thread's state to THREAD_ALLOC_FREE, we keep the state
-      // the same, but we still let other threads know that there was a free and they should
-      // handle accordingly.
-      if (t_state->thread_id != tid) {
-        switch (t_state->state) {
-          case thread_state::THREAD_ALLOC:
-            if (is_for_cpu == t_state->is_cpu_alloc) {
-              transition(t_state, thread_state::THREAD_ALLOC_FREE);
-            }
-            break;
-          default: break;
+    // Only update state for _other_ threads. We update only other threads, for the case
+    // where we are handling a free from the recursive case: when an allocation/free
+    // happened while handling an allocation failure in onAllocFailed.
+    //
+    // If we moved all threads to *_ALLOC_FREE, after we exit the recursive state and
+    // are back handling the original allocation failure, we are left with a thread
+    // in a state that won't be retried in `post_alloc_failed`.
+    //
+    // By not changing our thread's state to THREAD_ALLOC_FREE, we keep the state
+    // the same, but we still let other threads know that there was a free and they should
+    // handle accordingly.
+    if (alloc_threads.size() > 0) {
+      std::vector<std::shared_ptr<full_thread_state>> threads_to_transition;
+      for (auto t_state : alloc_threads) {
+        if (t_state->thread_id != tid && is_for_cpu == t_state->is_cpu_alloc) {
+          threads_to_transition.push_back(t_state);
         }
+      }
+      for (auto t_state : threads_to_transition) {
+        transition(t_state, thread_state::THREAD_ALLOC_FREE);
       }
     }
     wake_next_highest_priority_blocked(lock, is_for_cpu);
