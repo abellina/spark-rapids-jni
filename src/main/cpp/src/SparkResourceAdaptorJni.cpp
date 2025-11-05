@@ -1781,28 +1781,51 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     }
   }
 
-  bool is_thread_bufn_or_above(
-    std::shared_ptr<full_thread_state> state, 
+  /**
+   * Returns a set of thread IDs that are in BUFN (Blocked Until Further Notice) state or above.
+   * A thread is considered BUFN or above if:
+   * - It has pool_blocked set to true, OR
+   * - Its state is THREAD_BUFN, OR
+   * - Its thread ID is in the java_blocked_thread_ids set (for other states)
+   * 
+   * Threads in THREAD_BLOCKED state are NOT considered BUFN or above.
+   */
+  std::unordered_set<long> get_threads_bufn_or_above(
     std::set<long> const& java_blocked_thread_ids)
   {
-    LOG_INFO("is_thread_bufn_or_above: state: {}, java_blocked_thread_ids: {}",
-      state->thread_id, to_string(java_blocked_thread_ids));
-    bool ret = false;
-    if (state->pool_blocked) {
-      ret = true;
-    } else {
-      switch (state->state) {
-        case thread_state::THREAD_BLOCKED: ret = false; break;
-        case thread_state::THREAD_BUFN:
-          // empty we are looking for even a single thread that is not blocked
-          ret = true;
-          break;
-        default:
-          ret = java_blocked_thread_ids.find(state->thread_id) != java_blocked_thread_ids.end();
-          break;
+    LOG_INFO("get_threads_bufn_or_above: java_blocked_thread_ids: {}",
+      to_string(java_blocked_thread_ids));
+    
+    std::unordered_set<long> bufn_thread_ids;
+    
+    for (auto const& [thread_id, state] : threads) {
+      bool is_bufn = false;
+      
+      if (state->pool_blocked) {
+        is_bufn = true;
+      } else {
+        switch (state->state) {
+          case thread_state::THREAD_BLOCKED: 
+            is_bufn = false; 
+            break;
+          case thread_state::THREAD_BUFN:
+            // This thread is explicitly in BUFN state
+            is_bufn = true;
+            break;
+          default:
+            // For other states, check if the Java thread is blocked
+            is_bufn = java_blocked_thread_ids.find(thread_id) != java_blocked_thread_ids.end();
+            break;
+        }
+      }
+      
+      if (is_bufn) {
+        bufn_thread_ids.insert(thread_id);
       }
     }
-    return ret;
+    
+    LOG_INFO("get_threads_bufn_or_above: returning {} threads", bufn_thread_ids.size());
+    return bufn_thread_ids;
   }
 
   // Function to convert a set (ordered or unordered) to a concatenated string
@@ -1860,12 +1883,15 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     // blocked until further notice.
     std::unordered_set<long> blocked_task_ids;
 
+    // Get all threads that are BUFN or above
+    std::unordered_set<long> bufn_thread_ids = get_threads_bufn_or_above(java_blocked_thread_ids);
+
     // We are going to do two passes through the threads to deal with this.
     // First pass is to look at the dedicated task threads
     for (auto const& [thread_id, t_state] : threads) {
       long const task_id = t_state->task_id;
       if (task_id >= 0) {
-        bool const is_bufn_plus = is_thread_bufn_or_above(t_state, java_blocked_thread_ids);
+        bool const is_bufn_plus = bufn_thread_ids.find(thread_id) != bufn_thread_ids.end();
         if (is_bufn_plus) { bufn_task_ids.insert(task_id); }
         if (is_bufn_plus || t_state->state == thread_state::THREAD_BLOCKED) {
           blocked_task_ids.insert(task_id);
@@ -1886,7 +1912,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           }
         }
 
-        bool const is_bufn_plus = is_thread_bufn_or_above(t_state, java_blocked_thread_ids);
+        bool const is_bufn_plus = bufn_thread_ids.find(thread_id) != bufn_thread_ids.end();
         if (is_bufn_plus) {
           for (auto const& task_id : t_state->pool_task_ids) {
             auto const it = pool_bufn_task_thread_count.find(task_id);
