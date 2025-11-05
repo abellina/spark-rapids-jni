@@ -1227,6 +1227,14 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // Key: thread_priority, Value: shared_ptr to the thread state
   std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> blocked_threads;
 
+  // Map of BUFN (Blocked Until Further Notice) threads ordered by priority (highest priority first)
+  // Key: thread_priority, Value: shared_ptr to the thread state
+  std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> bufn_threads;
+
+  // Map of pool_blocked threads ordered by priority (highest priority first)
+  // Key: thread_priority, Value: shared_ptr to the thread state
+  std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> pool_blocked_threads;
+
   // used when we are calling check_and_update_for_bufn without the java_blocked_thread_ids
   std::set<long> java_threads_assumed_running;
   
@@ -1251,6 +1259,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    * 
    * If transitioning from BLOCKED, the thread is removed from the blocked_threads map.
    * If transitioning to BLOCKED, the thread is added to the blocked_threads map.
+   * If transitioning from BUFN, the thread is removed from the bufn_threads map.
+   * If transitioning to BUFN, the thread is added to the bufn_threads map.
    */
   void transition(std::shared_ptr<full_thread_state> state, thread_state const new_state)
   {
@@ -1260,6 +1270,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     // Remove from tracking maps when transitioning FROM these states
     if (original == thread_state::THREAD_BLOCKED) {
       blocked_threads.erase(priority);
+    } else if (original == thread_state::THREAD_BUFN) {
+      bufn_threads.erase(priority);
     }
     
     state->transition_to(new_state);
@@ -1267,9 +1279,12 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     // Add to tracking maps when transitioning TO these states
     if (new_state == thread_state::THREAD_BLOCKED) {
       blocked_threads.insert({priority, state});
+    } else if (new_state == thread_state::THREAD_BUFN) {
+      bufn_threads.insert({priority, state});
     }
 
-    LOG_INFO("blocked_threads size: {}", blocked_threads.size());
+    LOG_INFO("blocked_threads size: {}, bufn_threads size: {}", 
+             blocked_threads.size(), bufn_threads.size());
     
     LOG_TRANSITION(state->thread_id, state->task_id, original, new_state);
   }
@@ -1296,7 +1311,20 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       throw std::invalid_argument(ss.str());
     }
 
+    bool const was_pool_blocked = thread->second->pool_blocked;
     thread->second->pool_blocked = pool_blocked;
+    
+    // Update pool_blocked_threads map
+    thread_priority priority = thread->second->priority();
+    if (was_pool_blocked && !pool_blocked) {
+      // Transitioning from pool_blocked to not pool_blocked
+      pool_blocked_threads.erase(priority);
+    } else if (!was_pool_blocked && pool_blocked) {
+      // Transitioning from not pool_blocked to pool_blocked
+      pool_blocked_threads.insert({priority, thread->second});
+    }
+    
+    LOG_INFO("pool_blocked_threads size: {}", pool_blocked_threads.size());
   }
 
   /**
@@ -1786,31 +1814,18 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       to_string(java_blocked_thread_ids));
     
     std::unordered_set<long> bufn_thread_ids;
-    
-    for (auto const& [thread_id, state] : threads) {
-      bool is_bufn = false;
-      
-      if (state->pool_blocked) {
-        is_bufn = true;
-      } else {
-        switch (state->state) {
-          case thread_state::THREAD_BLOCKED: 
-            is_bufn = false; 
-            break;
-          case thread_state::THREAD_BUFN:
-            // This thread is explicitly in BUFN state
-            is_bufn = true;
-            break;
-          default:
-            // For other states, check if the Java thread is blocked
-            is_bufn = java_blocked_thread_ids.find(thread_id) != java_blocked_thread_ids.end();
-            break;
-        }
-      }
-      
-      if (is_bufn) {
-        bufn_thread_ids.insert(thread_id);
-      }
+
+    // Add all threads in BUFN state
+    for (auto const& [priority, t_state] : bufn_threads) {
+      bufn_thread_ids.insert(t_state->thread_id);
+    }
+    // Add all threads in pool_blocked state
+    for (auto const& [priority, t_state] : pool_blocked_threads) {
+      bufn_thread_ids.insert(t_state->thread_id);
+    }
+    // Add all threads in java_blocked_thread_ids
+    for (auto const& thread_id : java_blocked_thread_ids) {
+      bufn_thread_ids.insert(thread_id);
     }
     
     LOG_INFO("get_threads_bufn_or_above: returning {} threads", bufn_thread_ids.size());
@@ -1873,6 +1888,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     std::unordered_set<long> blocked_task_ids;
 
     // Get all threads that are BUFN or above
+    // wether they are pool threads or dedicated task threads.
     std::unordered_set<long> bufn_thread_ids = get_threads_bufn_or_above(java_blocked_thread_ids);
 
     // We are going to do two passes through the threads to deal with this.
@@ -1892,6 +1908,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     for (auto const& [thread_id, t_state] : threads) {
       long const is_pool_thread = t_state->task_id < 0;
       if (is_pool_thread) {
+        // update the count of pool threads working for a task_id.
         for (auto const& task_id : t_state->pool_task_ids) {
           auto const it = pool_task_thread_count.find(task_id);
           if (it != pool_task_thread_count.end()) {
@@ -1903,6 +1920,8 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
 
         bool const is_bufn_plus = bufn_thread_ids.find(thread_id) != bufn_thread_ids.end();
         if (is_bufn_plus) {
+          // update the count of pool threads that are in BUFN or blocked in the java side
+          // for a task id.
           for (auto const& task_id : t_state->pool_task_ids) {
             auto const it = pool_bufn_task_thread_count.find(task_id);
             if (it != pool_bufn_task_thread_count.end()) {
@@ -1912,6 +1931,10 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
             }
           }
         }
+
+        // if a pool thread is not in BUFN or blocked in the java side, then we
+        // assume the task id is not blocked, for deadlock busting purposes,
+        // so we remove from blocked_task_ids.
         if (!is_bufn_plus && t_state->state != thread_state::THREAD_BLOCKED) {
           for (auto const& task_id : t_state->pool_task_ids) {
             blocked_task_ids.erase(task_id);
