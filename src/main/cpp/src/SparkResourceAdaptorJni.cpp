@@ -1114,7 +1114,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     return ret;
   }
 
-  void check_and_break_deadlocks(std::set<long> const& java_blocked_thread_ids)
+  void check_and_break_deadlocks(std::unordered_set<long> const& java_blocked_thread_ids)
   {
     std::unique_lock<std::mutex> lock(state_mutex);
     check_and_update_for_bufn(lock, java_blocked_thread_ids);
@@ -1236,7 +1236,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   std::unordered_set<std::shared_ptr<full_thread_state>> alloc_threads;
 
   // used when we are calling check_and_update_for_bufn without the java_blocked_thread_ids
-  std::set<long> java_threads_assumed_running;
+  std::unordered_set<long> java_threads_assumed_running;
   
   // Set of all active task IDs (tasks that have at least one thread associated with them)
   // This is maintained incrementally as threads are associated/disassociated with tasks
@@ -1814,7 +1814,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    * Threads in THREAD_BLOCKED state are NOT considered BUFN or above.
    */
   std::unordered_map<long, std::shared_ptr<full_thread_state>> get_threads_bufn_or_above(
-    std::set<long> const& java_blocked_thread_ids)
+    std::unordered_set<long> const& java_blocked_thread_ids)
   {
     LOG_INFO("get_threads_bufn_or_above: java_blocked_thread_ids: {}",
       to_string(java_blocked_thread_ids));
@@ -1863,7 +1863,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    * or not, and the second is whether all threads are BUFN or above.
    */
   std::pair<bool, bool> is_in_deadlock(std::unique_lock<std::mutex> const& lock,
-                                       std::set<long> const& java_blocked_thread_ids)
+                                       std::unordered_set<long> const& java_blocked_thread_ids)
   {
     JNIEnv* env = nullptr;
     if (jvm->GetEnv(reinterpret_cast<void**>(&env), cudf::jni::MINIMUM_JNI_VERSION) != JNI_OK) {
@@ -2032,7 +2032,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   void check_and_update_for_bufn(
     const std::unique_lock<std::mutex>& lock, 
-    std::set<long> const& java_blocked_thread_ids)
+    std::unordered_set<long> const& java_blocked_thread_ids)
   {
     // TODO: can we simplify this
     auto const [need_to_break_deadlock, all_bufn] = is_in_deadlock(
@@ -2584,7 +2584,8 @@ JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_SparkResourceAdaptor_che
   {
     auto mr = reinterpret_cast<spark_resource_adaptor*>(ptr);
     cudf::jni::native_jlongArray blocked_thread_ids(env, jblocked_thread_ids);
-    std::set<long> blocked_thread_ids_set(blocked_thread_ids.begin(), blocked_thread_ids.end());
+    std::unordered_set<long> blocked_thread_ids_set(
+      blocked_thread_ids.begin(), blocked_thread_ids.end());
     mr->check_and_break_deadlocks(blocked_thread_ids_set);
   }
   JNI_CATCH(env, );
