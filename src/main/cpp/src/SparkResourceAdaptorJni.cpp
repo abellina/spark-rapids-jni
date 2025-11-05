@@ -1205,10 +1205,6 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   // Key: thread_priority, Value: shared_ptr to the thread state
   std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> blocked_threads;
   
-  // Map of BUFN (Blocked Until Further Notice) threads ordered by priority (highest priority first)
-  // Key: thread_priority, Value: shared_ptr to the thread state
-  std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> bufn_threads;
-  
   // Set of all active task IDs (tasks that have at least one thread associated with them)
   // This is maintained incrementally as threads are associated/disassociated with tasks
   std::unordered_set<long> all_task_ids;
@@ -1230,8 +1226,6 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    * 
    * If transitioning from BLOCKED, the thread is removed from the blocked_threads map.
    * If transitioning to BLOCKED, the thread is added to the blocked_threads map.
-   * If transitioning from BUFN, the thread is removed from the bufn_threads map.
-   * If transitioning to BUFN, the thread is added to the bufn_threads map.
    */
   void transition(std::shared_ptr<full_thread_state> state,
                   thread_state const new_state)
@@ -1242,8 +1236,6 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     // Remove from tracking maps when transitioning FROM these states
     if (original == thread_state::THREAD_BLOCKED) {
       blocked_threads.erase(priority);
-    } else if (original == thread_state::THREAD_BUFN) {
-      bufn_threads.erase(priority);
     }
     
     state->transition_to(new_state);
@@ -1251,11 +1243,9 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     // Add to tracking maps when transitioning TO these states
     if (new_state == thread_state::THREAD_BLOCKED) {
       blocked_threads.insert({priority, state});
-    } else if (new_state == thread_state::THREAD_BUFN) {
-      bufn_threads.insert({priority, state});
     }
 
-    LOG_INFO("blocked_threads size: {}, bufn_threads size: {}", blocked_threads.size(), bufn_threads.size());
+    LOG_INFO("blocked_threads size: {}", blocked_threads.size());
     
     LOG_TRANSITION(state->thread_id, state->task_id, original, new_state);
   }
@@ -1697,11 +1687,11 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
         case thread_state::THREAD_ALLOC:
           // fall through
         case thread_state::THREAD_ALLOC_FREE:
+          // unlikely
           if (thread->second->is_cpu_alloc != is_for_cpu) {
             std::stringstream ss;
             ss << "thread " << thread_id << " has a mismatch on CPU vs GPU post alloc "
                << as_str(thread->second->state);
-
             throw std::invalid_argument(ss.str());
           }
           transition(thread->second, thread_state::THREAD_RUNNING);
@@ -1916,6 +1906,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
    */
   void check_and_update_for_bufn(const std::unique_lock<std::mutex>& lock)
   {
+    // TODO: can we simplify this
     std::map<long, long> pool_bufn_task_thread_count;
     std::map<long, long> pool_task_thread_count;
     std::unordered_set<long> bufn_task_ids;
@@ -2030,11 +2021,11 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     // only retry if this was due to an out of memory exception.
     bool ret = true;
     if (!was_recursive && thread != threads.end()) {
+      // unlikely
       if (thread->second->is_cpu_alloc != is_for_cpu) {
         std::stringstream ss;
         ss << "thread " << thread_id << " has a mismatch on CPU vs GPU post alloc "
            << as_str(thread->second->state);
-
         throw std::invalid_argument(ss.str());
       }
 
