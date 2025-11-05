@@ -1105,10 +1105,10 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     return ret;
   }
 
-  void check_and_break_deadlocks()
+  void check_and_break_deadlocks(std::set<long> const& java_blocked_thread_ids)
   {
     std::unique_lock<std::mutex> lock(state_mutex);
-    check_and_update_for_bufn(lock);
+    check_and_update_for_bufn(lock, java_blocked_thread_ids);
   }
 
   bool cpu_prealloc(size_t const amount, bool const blocking)
@@ -1199,11 +1199,15 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   std::condition_variable task_has_woken_condition;
   std::map<long, std::shared_ptr<full_thread_state>> threads;
   std::map<long, std::set<long>> task_to_threads;
+  
   long gpu_memory_allocated_bytes = 0;
   
   // Map of blocked threads ordered by priority (highest priority first)
   // Key: thread_priority, Value: shared_ptr to the thread state
   std::map<thread_priority, std::shared_ptr<full_thread_state>, std::greater<thread_priority>> blocked_threads;
+
+  // used when we are calling check_and_update_for_bufn without the java_blocked_thread_ids
+  std::set<long> java_threads_assumed_running;
   
   // Set of all active task IDs (tasks that have at least one thread associated with them)
   // This is maintained incrementally as threads are associated/disassociated with tasks
@@ -1385,7 +1389,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
             // Before we can wait it is possible that the throw didn't release anything
             // and the other threads didn't get unblocked by this, so we need to
             // check again to see if this was fixed or not.
-            check_and_update_for_bufn(lock);
+            check_and_update_for_bufn_state_machine_only(lock);
             // If that caused us to transition to a new state, then we need to adjust to it
             // appropriately...
             if (is_blocked(thread->second->state)) {
@@ -1742,8 +1746,12 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     }
   }
 
-  bool is_thread_bufn_or_above(JNIEnv* env, std::shared_ptr<full_thread_state> state)
+  bool is_thread_bufn_or_above(
+    std::shared_ptr<full_thread_state> state, 
+    std::set<long> const& java_blocked_thread_ids)
   {
+    LOG_INFO("is_thread_bufn_or_above: state: {}, java_blocked_thread_ids: {}",
+      state->thread_id, to_string(java_blocked_thread_ids));
     bool ret = false;
     if (state->pool_blocked) {
       ret = true;
@@ -1755,8 +1763,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           ret = true;
           break;
         default:
-          ret = env->CallStaticBooleanMethod(
-            ThreadStateRegistry_jclass, isThreadBlocked_method, state->thread_id);
+          ret = java_blocked_thread_ids.find(state->thread_id) != java_blocked_thread_ids.end();
           break;
       }
     }
@@ -1780,10 +1787,11 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     return oss.str();
   }
 
-  bool is_in_deadlock(std::map<long, long>& pool_bufn_task_thread_count,
+  bool is_in_deadlock(std::unique_lock<std::mutex> const& lock,
+                      std::map<long, long>& pool_bufn_task_thread_count,
                       std::map<long, long>& pool_task_thread_count,
                       std::unordered_set<long>& bufn_task_ids,
-                      std::unique_lock<std::mutex> const& lock)
+                      std::set<long> const& java_blocked_thread_ids)
   {
     JNIEnv* env = nullptr;
     if (jvm->GetEnv(reinterpret_cast<void**>(&env), cudf::jni::MINIMUM_JNI_VERSION) != JNI_OK) {
@@ -1822,7 +1830,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
     for (auto const& [thread_id, t_state] : threads) {
       long const task_id = t_state->task_id;
       if (task_id >= 0) {
-        bool const is_bufn_plus = is_thread_bufn_or_above(env, t_state);
+        bool const is_bufn_plus = is_thread_bufn_or_above(t_state, java_blocked_thread_ids);
         if (is_bufn_plus) { bufn_task_ids.insert(task_id); }
         if (is_bufn_plus || t_state->state == thread_state::THREAD_BLOCKED) {
           blocked_task_ids.insert(task_id);
@@ -1843,7 +1851,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
           }
         }
 
-        bool const is_bufn_plus = is_thread_bufn_or_above(env, t_state);
+        bool const is_bufn_plus = is_thread_bufn_or_above(t_state, java_blocked_thread_ids);
         if (is_bufn_plus) {
           for (auto const& task_id : t_state->pool_task_ids) {
             auto const it = pool_bufn_task_thread_count.find(task_id);
@@ -1900,58 +1908,65 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
   }
 
   /**
+   * This method is only called from code that only cares about the state machine state, 
+   * and is happening very often. Our deadlock busting thread will invoke 
+   * `check_and_update_for_bufn` directly, and pass along a set of java native thread ids
+   * that are blocked in the java state (Thread.getState).
+   * 
+   * This split in invocation is done to make the critical sections faster, and leave
+   * deadlock busting to the deadlock thread.
+   */
+  void check_and_update_for_bufn_state_machine_only(const std::unique_lock<std::mutex>& lock) {
+    check_and_update_for_bufn(lock, java_threads_assumed_running);
+  }
+  
+  /**
    * Check to see if any threads need to move to BUFN. This should be
    * called when a task or shuffle thread becomes blocked so that we can
    * check to see if one of them needs to become BUFN or do a split and rollback.
+   * 
+   * If this method is being called from the deadlock busting thread, we will pass
+   * along a set of java native thread ids that are blocked in the java state (Thread.getState).
    */
-  void check_and_update_for_bufn(const std::unique_lock<std::mutex>& lock)
+  void check_and_update_for_bufn(
+    const std::unique_lock<std::mutex>& lock, 
+    std::set<long> const& java_blocked_thread_ids)
   {
     // TODO: can we simplify this
     std::map<long, long> pool_bufn_task_thread_count;
     std::map<long, long> pool_task_thread_count;
     std::unordered_set<long> bufn_task_ids;
     bool const need_to_break_deadlock = is_in_deadlock(
-      pool_bufn_task_thread_count, pool_task_thread_count, bufn_task_ids, lock);
+      lock,
+      pool_bufn_task_thread_count, 
+      pool_task_thread_count, 
+      bufn_task_ids, 
+      java_blocked_thread_ids);
     if (need_to_break_deadlock) {
-      // Find the task thread with the lowest priority that is not already BUFN
-      thread_priority to_bufn(-1, -1);
-      bool is_to_bufn_set      = false;
-      int blocked_thread_count = 0;
-      for (auto const& [thread_id, t_state] : threads) {
-        switch (t_state->state) {
-          case thread_state::THREAD_BLOCKED: {
-            blocked_thread_count++;
-            thread_priority const& current = t_state->priority();
-            if (!is_to_bufn_set || current < to_bufn) {
-              to_bufn        = current;
-              is_to_bufn_set = true;
-            }
-          } break;
-          default: break;
+      // Find the task thread with the lowest priority that is blocked (not already BUFN)
+      // Since blocked_threads is ordered by priority (highest first), the last entry is the lowest priority
+      if (!blocked_threads.empty()) {
+        auto const last_blocked = std::prev(blocked_threads.end());
+        std::shared_ptr<full_thread_state> thread_to_bufn = last_blocked->second;
+        
+        if (blocked_threads.size() == 1) {
+          // This is the very last thread that is going to
+          // transition to BUFN. When that happens the
+          // thread would throw a split and retry exception.
+          // But we are not tracking when data is made spillable
+          // so if data was made spillable we will retry the
+          // allocation, instead of going to BUFN.
+          thread_to_bufn->is_retry_alloc_before_bufn = true;
+          LOG_STATUS("DETAIL", thread_to_bufn->thread_id, thread_to_bufn->task_id, thread_to_bufn->state,
+            "thread (id: {}) is_retry_alloc_before_bufn set to true", thread_to_bufn->thread_id);
+          transition(thread_to_bufn, thread_state::THREAD_RUNNING);
+        } else {
+          log_all_threads_states();
+          transition(thread_to_bufn, thread_state::THREAD_BUFN_THROW);
         }
+        thread_to_bufn->wake_condition->notify_all();
       }
-      if (is_to_bufn_set) {
-        long const thread_id_to_bufn = to_bufn.get_thread_id();
-        auto const thread            = threads.find(thread_id_to_bufn);
-        if (thread != threads.end()) {
-          if (blocked_thread_count == 1) {
-            // This is the very last thread that is going to
-            // transition to BUFN. When that happens the
-            // thread would throw a split and retry exception.
-            // But we are not tracking when data is made spillable
-            // so if data was made spillable we will retry the
-            // allocation, instead of going to BUFN.
-            thread->second->is_retry_alloc_before_bufn = true;
-            LOG_STATUS("DETAIL", thread_id_to_bufn, thread->second->task_id, thread->second->state,
-              "thread (id: {}) is_retry_alloc_before_bufn set to true", thread_id_to_bufn);
-            transition(thread->second, thread_state::THREAD_RUNNING);
-          } else {
-            log_all_threads_states();
-            transition(thread->second, thread_state::THREAD_BUFN_THROW);
-          }
-          thread->second->wake_condition->notify_all();
-        }
-      }
+    
       // We now need a way to detect if we need to split the input and retry.
       // This happens when all of the tasks are also blocked until
       // further notice. So we are going to treat a task as blocked until
@@ -2067,7 +2082,7 @@ class spark_resource_adaptor final : public rmm::mr::device_memory_resource {
       // do not retry if the thread is not registered...
       ret = false;
     }
-    check_and_update_for_bufn(lock);
+    check_and_update_for_bufn_state_machine_only(lock);
     return ret;
   }
 
@@ -2498,13 +2513,15 @@ JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_SparkResourceAdaptor_end
 }
 
 JNIEXPORT void JNICALL Java_com_nvidia_spark_rapids_jni_SparkResourceAdaptor_checkAndBreakDeadlocks(
-  JNIEnv* env, jclass, jlong ptr)
+  JNIEnv* env, jclass, jlong ptr, jlongArray jblocked_thread_ids)
 {
   JNI_NULL_CHECK(env, ptr, "resource_adaptor is null", );
   JNI_TRY
   {
     auto mr = reinterpret_cast<spark_resource_adaptor*>(ptr);
-    mr->check_and_break_deadlocks();
+    cudf::jni::native_jlongArray blocked_thread_ids(env, jblocked_thread_ids);
+    std::set<long> blocked_thread_ids_set(blocked_thread_ids.begin(), blocked_thread_ids.end());
+    mr->check_and_break_deadlocks(blocked_thread_ids_set);
   }
   JNI_CATCH(env, );
 }
