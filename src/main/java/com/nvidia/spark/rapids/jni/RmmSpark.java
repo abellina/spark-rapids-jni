@@ -55,7 +55,8 @@ public class RmmSpark {
    */
   public static void setEventHandler(RmmEventHandler handler, String logLocation) throws RmmException {
     // synchronize with RMM not RmmSpark to stay in sync with Rmm itself.
-    synchronized (Rmm.class) {
+    Rmm.writeLock.lock();
+    try {
       // RmmException constructor is not public, so we have to use a different exception
       if (!Rmm.isInitialized()) {
         throw new RuntimeException("RMM has not been initialized");
@@ -84,6 +85,8 @@ public class RmmSpark {
           eventHandler.releaseWrapped();
         }
       }
+    } finally {
+      Rmm.writeLock.unlock();
     }
   }
 
@@ -93,7 +96,8 @@ public class RmmSpark {
    */
   public static void clearEventHandler() throws RmmException {
     // synchronize with RMM not RmmSpark to stay in sync with Rmm itself.
-    synchronized (Rmm.class) {
+    Rmm.writeLock.lock();
+    try {
       RmmDeviceMemoryResource deviceResource = Rmm.getCurrentDeviceResource();
       if (deviceResource instanceof SparkResourceAdaptor) {
         SparkResourceAdaptor sra = (SparkResourceAdaptor) deviceResource;
@@ -111,6 +115,8 @@ public class RmmSpark {
           SparkResourceAdaptor.shutdownLogger();
         }
       }
+    } finally {
+      Rmm.writeLock.unlock();
     }
   }
 
@@ -128,11 +134,14 @@ public class RmmSpark {
    * @param taskId the task ID this thread is working on.
    */
   public static void startDedicatedTaskThread(long threadId, long taskId, Thread thread) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         ThreadStateRegistry.addThread(threadId, thread);
         sra.startDedicatedTaskThread(threadId, taskId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -152,11 +161,14 @@ public class RmmSpark {
    * @param taskIds the IDs of tasks that this is starting work on.
    */
   public static void shuffleThreadWorkingTasks(long threadId, Thread thread, long[] taskIds) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         ThreadStateRegistry.addThread(threadId, thread);
         sra.poolThreadWorkingOnTasks(true, threadId, taskIds);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -169,10 +181,13 @@ public class RmmSpark {
   }
 
   public static boolean isThreadWorkingOnTaskAsPoolThread() {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.isThreadWorkingOnTaskAsPoolThread(getCurrentThreadId());
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
     return false;
   }
@@ -186,11 +201,14 @@ public class RmmSpark {
     long threadId = getCurrentThreadId();
     Thread thread = Thread.currentThread();
     long[] taskIds = new long[]{taskId};
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         ThreadStateRegistry.addThread(threadId, thread);
         sra.poolThreadWorkingOnTasks(false, threadId, taskIds);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -201,10 +219,13 @@ public class RmmSpark {
    * @param taskIds the IDs of the tasks that are done.
    */
   public static void poolThreadFinishedForTasks(long threadId, long[] taskIds) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.poolThreadFinishedForTasks(threadId, taskIds);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -248,10 +269,13 @@ public class RmmSpark {
    * @param threadId the id of the thread, not the java ID.
    */
   public static void startRetryBlock(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try{
       if (sra != null && sra.isOpen()) {
         sra.startRetryBlock(threadId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -267,10 +291,13 @@ public class RmmSpark {
    * @param threadId the id of the thread, not the java ID.
    */
   public static void endRetryBlock(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.endRetryBlock(threadId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -282,10 +309,13 @@ public class RmmSpark {
   }
 
   private static void checkAndBreakDeadlocks() {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.checkAndBreakDeadlocks();
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -295,10 +325,12 @@ public class RmmSpark {
    *                 (not java thread id).
    */
   public static void removeDedicatedThreadAssociation(long threadId, long taskId) {
-    synchronized (Rmm.class) {
+    try {
       if (sra != null && sra.isOpen()) {
         sra.removeThreadAssociation(threadId, taskId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -316,10 +348,13 @@ public class RmmSpark {
    * @param threadId the id of the thread to clean up
    */
   public static void removeAllThreadAssociation(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.removeThreadAssociation(threadId, -1);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -338,10 +373,13 @@ public class RmmSpark {
    * @param taskId the ID of the task that has completed.
    */
   public static void taskDone(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.taskDone(taskId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -350,10 +388,13 @@ public class RmmSpark {
    * @param threadId the ID of the thread that is about to submit the work.
    */
   public static void submittingToPool(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.submittingToPool(threadId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -371,10 +412,13 @@ public class RmmSpark {
    * @param threadId the ID of the thread that is about to wait.
    */
   public static void waitingOnPool(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.waitingOnPool(threadId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -392,10 +436,13 @@ public class RmmSpark {
    * @param threadId the ID of the thread that is done.
    */
   public static void doneWaitingOnPool(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.doneWaitingOnPool(threadId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -424,8 +471,11 @@ public class RmmSpark {
    */
   public static void blockThreadUntilReady() {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     // Technically there is a race here, but because this can block we cannot hold the Rmm
     // lock while doing this, or we can deadlock. So we are going to rely on Rmm shutting down
@@ -453,12 +503,15 @@ public class RmmSpark {
    * @param skipCount how many matching allocations to skip
    */
   public static void forceRetryOOM(long threadId, int numOOMs, int oomMode, int skipCount) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.forceRetryOOM(threadId, numOOMs, oomMode, skipCount);
       } else {
         throw new IllegalStateException("RMM has not been configured for OOM injection");
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -484,12 +537,15 @@ public class RmmSpark {
    * @param skipCount how many matching allocations to skip
    */
   public static void forceSplitAndRetryOOM(long threadId, int numOOMs, int oomMode, int skipCount) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.forceSplitAndRetryOOM(threadId, numOOMs, oomMode, skipCount);
       } else {
         throw new IllegalStateException("RMM has not been configured for OOM injection");
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -513,23 +569,29 @@ public class RmmSpark {
    * @param numTimes the number of times the CudfException should be thrown
    */
   public static void forceCudfException(long threadId, int numTimes) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         sra.forceCudfException(threadId, numTimes);
       } else {
         throw new IllegalStateException("RMM has not been configured for OOM injection");
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
   public static RmmSparkThreadState getStateOf(long threadId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getStateOf(threadId);
       } else {
         // sra is not set so the thread is by definition unknown to it.
         return RmmSparkThreadState.UNKNOWN;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -542,10 +604,13 @@ public class RmmSpark {
    * @param taskId the id of the task to remove metrics for.
    */
   public static void removeTaskMetrics(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
          sra.removeTaskMetrics(taskId);
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -555,13 +620,16 @@ public class RmmSpark {
    * @return the number of times it was thrown or 0 if in the UNKNOWN state.
    */
   public static int getAndResetNumRetryThrow(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getAndResetNumRetryThrow(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -571,13 +639,16 @@ public class RmmSpark {
    * @return the number of times it was thrown or 0 if in the UNKNOWN state.
    */
   public static int getAndResetNumSplitRetryThrow(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getAndResetNumSplitRetryThrow(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -587,13 +658,16 @@ public class RmmSpark {
    * @return the time the task was blocked or 0 if in the UNKNOWN state.
    */
   public static long getAndResetBlockTimeNs(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getAndResetBlockTime(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -603,24 +677,30 @@ public class RmmSpark {
    * @return the time the task did computation that was lost.
    */
   public static long getAndResetComputeTimeLostToRetryNs(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getAndResetComputeTimeLostToRetry(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
   public static long getTotalBlockedOrLostTime(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getTotalBlockedOrLostTime(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -630,24 +710,30 @@ public class RmmSpark {
    * @return the max device memory footprint.
    */
   public static long getAndResetGpuMaxMemoryAllocated(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getAndResetGpuMaxMemoryAllocated(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
   public static long getMaxGpuTaskMemory(long taskId) {
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       if (sra != null && sra.isOpen()) {
         return sra.getMaxGpuTaskMemory(taskId);
       } else {
         // sra is not set so the value is by definition 0
         return 0;
       }
+    } finally {
+      Rmm.readLock.unlock();
     }
   }
 
@@ -662,8 +748,11 @@ public class RmmSpark {
    */
   public static boolean preCpuAlloc(long amount, boolean blocking) {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     if (local != null && local.isOpen()) {
       return local.preCpuAlloc(amount, blocking);
@@ -682,8 +771,11 @@ public class RmmSpark {
   public static void postCpuAllocSuccess(long ptr, long amount, boolean blocking,
                                          boolean wasRecursive) {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     if (local != null && local.isOpen()) {
       local.postCpuAllocSuccess(ptr, amount, blocking, wasRecursive);
@@ -700,8 +792,11 @@ public class RmmSpark {
    */
   public static boolean postCpuAllocFailed(boolean wasOom, boolean blocking, boolean wasRecursive) {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     if (local != null && local.isOpen()) {
       return local.postCpuAllocFailed(wasOom, blocking, wasRecursive);
@@ -717,8 +812,11 @@ public class RmmSpark {
    */
   public static void cpuDeallocate(long ptr, long amount) {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     if (local != null && local.isOpen()) {
       local.cpuDeallocate(ptr, amount);
@@ -727,8 +825,11 @@ public class RmmSpark {
 
   public static void spillRangeStart() {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     if (local != null && local.isOpen()) {
       local.spillRangeStart();
@@ -737,8 +838,11 @@ public class RmmSpark {
 
   public static void spillRangeDone() {
     SparkResourceAdaptor local;
-    synchronized (Rmm.class) {
+    Rmm.readLock.lock();
+    try {
       local = sra;
+    } finally {
+      Rmm.readLock.unlock();
     }
     if (local != null && local.isOpen()) {
       local.spillRangeDone();
